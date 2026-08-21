@@ -486,3 +486,7 @@ $RECYCLE.BIN/
 # appsettings.json carries structure and defaults only.
 appsettings.Development.json
 appsettings.Local.json
+
+# The restart script's log
+api.log
+api.log.err

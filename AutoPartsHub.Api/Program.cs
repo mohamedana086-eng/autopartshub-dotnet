@@ -2,6 +2,7 @@ using AutoPartsHub.Api;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Endpoints;
+using AutoPartsHub.Api.Pricing;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -27,6 +28,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // environment without also running, so there is no build to keep working.
 builder.Services.AddSingleton(new SessionTokens(
     AuthSecret.Resolve(Environment.GetEnvironmentVariable("AUTH_SECRET"), builder.Environment.IsProduction())));
+
+builder.Services.AddScoped<PricingContextLoader>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
@@ -72,5 +75,6 @@ app.MapGet("/health/db", async (AutoPartsContext db) =>
 app.MapCatalogueEndpoints();
 app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
+app.MapProductEndpoints();
 
 app.Run();
