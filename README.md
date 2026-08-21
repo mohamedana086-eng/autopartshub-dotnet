@@ -97,9 +97,10 @@ Ported and verified against the live Node API:
 - `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`
 - the pricing engine — not an endpoint, but what every priced response calls
 - stock reservation — likewise, and the part LINQ cannot express
+- `GET /api/catalog/search` — 105 filter combinations compared
 
-Remaining: 59 of 63 endpoints. Auth and the stock reservation path are the two
-left that carry real logic rather than shape.
+Remaining: 56 of 63. What is left is CRUD on patterns already settled: the
+admin lists, the basket, orders and notifications.
 
 ## How a port is checked
 

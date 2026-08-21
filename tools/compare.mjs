@@ -91,6 +91,49 @@ for (const p of sample) {
 }
 GROUPS.product.push(['anonymous', '/api/catalog/products/no-such-id']);
 
+GROUPS.search = [];
+for (const qs of [
+  "",
+  "q=brake",
+  "q=brembo",
+  "q=bosch brake pad",
+  "q=0986424815",
+  "q=0 986 424 815",
+  "q=P 06 020",
+  "q=brak pd",
+  "q=zzzznothing",
+  "q=thermostat",
+  "system=brake-system",
+  "system=cooling-system&q=thermostat",
+  "manufacturer=BOSCH",
+  "manufacturer=bosch",
+  "sort=price-asc",
+  "sort=price-desc",
+  "sort=delivery",
+  "sort=nonsense",
+  "minRating=4",
+  "minRating=9",
+  "reliability=official",
+  "reliability=nope",
+  "returns=true",
+  "limit=3",
+  "limit=0",
+  "limit=9999",
+  "minPrice=20&maxPrice=60",
+  "minPrice=-5",
+  "q=brake&matchIn=part-number",
+  "q=brake&matchIn=oem,aftermarket",
+  "q=brake&matchIn=all",
+  "supplier=ib16-parts",
+  "supplier=nope",
+  "q=brake&system=brake-system&manufacturer=BOSCH&sort=price-asc",
+  "q=0986&matchIn=part-number&minRating=3&returns=true"
+]) {
+  for (const who of ['anonymous', 'retail', 'admin']) {
+    GROUPS.search.push([who, '/api/catalog/search' + (qs ? '?' + qs : '?q=')]);
+  }
+}
+
 const only = process.argv[2];
 const groups = only ? { [only]: GROUPS[only] ?? [] } : GROUPS;
 

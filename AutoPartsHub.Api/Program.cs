@@ -2,6 +2,7 @@ using AutoPartsHub.Api;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Endpoints;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Pricing;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +31,7 @@ builder.Services.AddSingleton(new SessionTokens(
     AuthSecret.Resolve(Environment.GetEnvironmentVariable("AUTH_SECRET"), builder.Environment.IsProduction())));
 
 builder.Services.AddScoped<PricingContextLoader>();
+builder.Services.AddScoped<SearchQueries>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
@@ -76,5 +78,6 @@ app.MapCatalogueEndpoints();
 app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
 app.MapProductEndpoints();
+app.MapSearchEndpoints();
 
 app.Run();
