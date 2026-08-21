@@ -94,7 +94,9 @@ Ported and verified against the live Node API:
 - `GET /api/suppliers`
 - `GET /api/vehicles`
 - `GET /api/vehicles/vin`
+- `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`
 - the pricing engine — not an endpoint, but what every priced response calls
+- stock reservation — likewise, and the part LINQ cannot express
 
 Remaining: 59 of 63 endpoints. Auth and the stock reservation path are the two
 left that carry real logic rather than shape.

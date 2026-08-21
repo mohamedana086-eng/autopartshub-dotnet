@@ -53,6 +53,9 @@ if (app.Environment.IsDevelopment())
     // markup screen does, and what no anonymous caller may. Development only.
     // It is here to be compared against the TypeScript engine, field by field.
     app.MapPricingProbe();
+
+    // Holds stock with no order behind it, so the locking can be raced.
+    app.MapStockProbe();
 }
 
 app.UseCors(StorefrontCors);
