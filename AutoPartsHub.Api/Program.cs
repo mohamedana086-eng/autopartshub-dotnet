@@ -1,4 +1,5 @@
 using AutoPartsHub.Api;
+using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Endpoints;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,12 @@ builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(
         new System.Text.Json.Serialization.JsonStringEnumConverter()));
+
+// One instance, holding the resolved key. Resolved at startup rather than at
+// first use: unlike the Node build, nothing here compiles under a production
+// environment without also running, so there is no build to keep working.
+builder.Services.AddSingleton(new SessionTokens(
+    AuthSecret.Resolve(Environment.GetEnvironmentVariable("AUTH_SECRET"), builder.Environment.IsProduction())));
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
@@ -61,5 +68,6 @@ app.MapGet("/health/db", async (AutoPartsContext db) =>
 
 app.MapCatalogueEndpoints();
 app.MapVehicleEndpoints();
+app.MapAuthEndpoints();
 
 app.Run();
