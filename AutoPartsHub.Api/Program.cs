@@ -61,6 +61,10 @@ if (app.Environment.IsDevelopment())
 
     // Holds stock with no order behind it, so the locking can be raced.
     app.MapStockProbe();
+
+    // Deletes an order and gives back the stock it held, so a test can place
+    // a real one and not leave it behind.
+    app.MapOrderProbe();
 }
 
 app.UseCors(StorefrontCors);
@@ -81,5 +85,6 @@ app.MapProductEndpoints();
 app.MapSearchEndpoints();
 app.MapCartEndpoints();
 app.MapNotificationEndpoints();
+app.MapOrderEndpoints();
 
 app.Run();

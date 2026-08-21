@@ -141,6 +141,9 @@ GROUPS.account = [
   ['anonymous', '/api/notifications'],
   ['retail', '/api/notifications'],
   ['admin', '/api/notifications'],
+  ['anonymous', '/api/orders'],
+  ['retail', '/api/orders'],
+  ['admin', '/api/orders'],
 ];
 
 const only = process.argv[2];

@@ -45,33 +45,44 @@ public static class CartEndpoints
         // copies drifting apart, which is what per-item calls would have to
         // reconcile.
         app.MapPut("/api/cart", async (
-            CartWriteRequest? body, HttpContext http, SessionTokens tokens, AutoPartsContext db,
+            System.Text.Json.JsonElement body, HttpContext http, SessionTokens tokens, AutoPartsContext db,
             PricingContextLoader pricing, CancellationToken ct) =>
         {
             var session = tokens.Decode(http.Request.Cookies[SessionTokens.CookieName]);
             if (session is null) return Results.Json(new { error = "Not signed in." }, statusCode: 401);
 
-            if (body?.Items is null) return Results.BadRequest(new { error = "Expected a list of items." });
-            if (body.Items.Count > MaxLines)
+            // Raw JSON rather than a typed model, so a bad quantity is answered
+            // with a sentence instead of a binding failure. See JsonValues.
+            var items = JsonValues.Get(body, "items");
+            if (items is not { ValueKind: System.Text.Json.JsonValueKind.Array } list)
+            {
+                return Results.BadRequest(new { error = "Expected a list of items." });
+            }
+            if (list.GetArrayLength() > MaxLines)
             {
                 return Results.BadRequest(new { error = "That is more lines than a basket can hold." });
             }
 
             var wanted = new Dictionary<string, int>();
-            foreach (var entry in body.Items)
+            foreach (var entry in list.EnumerateArray())
             {
-                var productId = (entry.ProductId ?? "").Trim();
-                var quantity = entry.Quantity;
+                if (entry.ValueKind != System.Text.Json.JsonValueKind.Object)
+                {
+                    return Results.BadRequest(new { error = "Every item must be an object." });
+                }
+
+                var productId = JsonValues.AsString(JsonValues.Get(entry, "productId")).Trim();
+                var quantity = JsonValues.AsNumber(JsonValues.Get(entry, "quantity"));
 
                 if (productId.Length == 0) return Results.BadRequest(new { error = "Every item needs a product." });
-                if (quantity < 1)
+                if (!JsonValues.IsWhole(quantity) || quantity < 1)
                 {
                     return Results.BadRequest(new { error = "Quantity must be a whole number of one or more." });
                 }
 
                 // The same part twice is one line with the quantities added,
                 // which is what the unique key on (cart, product) means.
-                wanted[productId] = wanted.GetValueOrDefault(productId) + quantity;
+                wanted[productId] = wanted.GetValueOrDefault(productId) + (int)quantity!.Value;
             }
 
             var ids = wanted.Keys.ToArray();
@@ -203,8 +214,6 @@ public static class CartEndpoints
     }
 }
 
-public record CartWriteRequest(List<CartLineRequest>? Items);
-public record CartLineRequest(string? ProductId, int Quantity);
 
 /// <summary>One basket line, flat and priced from the caller's tier.</summary>
 public record BasketLineRow(
