@@ -32,6 +32,7 @@ builder.Services.AddSingleton(new SessionTokens(
 
 builder.Services.AddScoped<PricingContextLoader>();
 builder.Services.AddScoped<SearchQueries>();
+builder.Services.AddSingleton<AdminGate>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
@@ -86,5 +87,6 @@ app.MapSearchEndpoints();
 app.MapCartEndpoints();
 app.MapNotificationEndpoints();
 app.MapOrderEndpoints();
+app.MapAdminDeskEndpoints();
 
 app.Run();
