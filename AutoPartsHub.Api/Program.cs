@@ -89,5 +89,6 @@ app.MapNotificationEndpoints();
 app.MapOrderEndpoints();
 app.MapAdminDeskEndpoints();
 app.MapAdminReferenceEndpoints();
+app.MapAdminSiteWriteEndpoints();
 
 app.Run();
