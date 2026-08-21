@@ -14,6 +14,13 @@ if (builder.Environment.IsDevelopment())
 
 builder.Services.AddOpenApi();
 
+// Enums travel as their names, not their ordinals. The storefront is
+// TypeScript and reads "PERCENT", and an ordinal would silently change meaning
+// the day someone inserts a value into the middle of an enum.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(
+        new System.Text.Json.Serialization.JsonStringEnumConverter()));
+
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
 
@@ -34,6 +41,11 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+
+    // Prices with whatever rules the caller sends — which is what the admin's
+    // markup screen does, and what no anonymous caller may. Development only.
+    // It is here to be compared against the TypeScript engine, field by field.
+    app.MapPricingProbe();
 }
 
 app.UseCors(StorefrontCors);

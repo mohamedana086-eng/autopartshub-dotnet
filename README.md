@@ -74,16 +74,27 @@ raw SQL through `FromSql`, the same statements the Node API already runs:
 That is a normal way to use EF Core, and better supported than the equivalent
 escape hatch in the ORM this project just left.
 
+## Checking a port that carries logic
+
+Shape can be compared by sending the same request to both APIs. Logic needs
+more, because the interesting failures are not visible in one example: a
+rounding half-case, a tie broken the other way, a percentage formatted
+differently inside a sentence the customer reads.
+
+The pricing engine is pure on both sides, so  pushes
+generated inputs through both and compares every field — prices, margins,
+clamped discounts, currency, and the applied-rule text. 400 cases, no
+differences. The generator is seeded, so a failure can be re-run.
+
 ## Progress
 
 Ported and verified byte-for-byte against the live Node API:
 
 - `GET /api/systems`
-- `GET /api/suppliers`
+- - - - the pricing engine (not an endpoint — the thing every priced response calls)
 
-Remaining: 61 of 63 endpoints. Auth, the pricing engine and the stock
-reservation path are the three that carry real logic rather than shape, and
-they want porting carefully rather than quickly.
+Remaining: 59 of 63 endpoints. Auth and the stock reservation path are the two left that carry
+real logic rather than shape.
 
 ## How a port is checked
 
