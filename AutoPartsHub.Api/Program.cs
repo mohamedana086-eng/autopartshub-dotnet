@@ -79,5 +79,7 @@ app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
 app.MapProductEndpoints();
 app.MapSearchEndpoints();
+app.MapCartEndpoints();
+app.MapNotificationEndpoints();
 
 app.Run();

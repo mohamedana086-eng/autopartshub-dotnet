@@ -134,6 +134,15 @@ for (const qs of [
   }
 }
 
+GROUPS.account = [
+  ['anonymous', '/api/cart'],
+  ['retail', '/api/cart'],
+  ['admin', '/api/cart'],
+  ['anonymous', '/api/notifications'],
+  ['retail', '/api/notifications'],
+  ['admin', '/api/notifications'],
+];
+
 const only = process.argv[2];
 const groups = only ? { [only]: GROUPS[only] ?? [] } : GROUPS;
 
