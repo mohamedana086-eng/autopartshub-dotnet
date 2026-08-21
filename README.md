@@ -101,8 +101,9 @@ Ported and verified against the live Node API:
 - `GET`/`PUT /api/cart`
 - `GET`/`POST /api/notifications`, `PATCH /api/notifications/{id}`
 
-Remaining: 52 of 63. What is left is CRUD on patterns already settled: the
-admin lists, the basket, orders and notifications.
+Remaining: 52 of 63. Every read is done. What is left creates, edits and deletes,
+which needs the same discipline the order test used: make the data, use it,
+remove it, and check nothing real was touched.
 
 ## How a port is checked
 

@@ -88,5 +88,6 @@ app.MapCartEndpoints();
 app.MapNotificationEndpoints();
 app.MapOrderEndpoints();
 app.MapAdminDeskEndpoints();
+app.MapAdminReferenceEndpoints();
 
 app.Run();

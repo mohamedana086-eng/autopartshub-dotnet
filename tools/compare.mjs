@@ -147,7 +147,10 @@ GROUPS.account = [
 ];
 
 GROUPS.admin = [];
-for (const path of ['/api/admin/stats', '/api/admin/orders', '/api/admin/carts', '/api/admin/notifications']) {
+for (const path of ['/api/admin/stats', '/api/admin/orders', '/api/admin/carts', '/api/admin/notifications',
+  '/api/admin/suppliers', '/api/admin/warehouses', '/api/admin/outlets', '/api/admin/currencies',
+  '/api/admin/client-categories', '/api/admin/markup-rules', '/api/admin/price-lists',
+  '/api/admin/price-lists/no-such-list', '/api/admin/clients']) {
   for (const who of ['anonymous', 'retail', 'admin']) GROUPS.admin.push([who, path]);
 }
 
