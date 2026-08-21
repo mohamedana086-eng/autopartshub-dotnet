@@ -48,5 +48,6 @@ app.MapGet("/health/db", async (AutoPartsContext db) =>
         : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
 app.MapCatalogueEndpoints();
+app.MapVehicleEndpoints();
 
 app.Run();
