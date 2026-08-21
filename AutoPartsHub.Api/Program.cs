@@ -90,5 +90,7 @@ app.MapOrderEndpoints();
 app.MapAdminDeskEndpoints();
 app.MapAdminReferenceEndpoints();
 app.MapAdminSiteWriteEndpoints();
+app.MapAdminPricingWriteEndpoints();
+app.MapAdminCatalogueWriteEndpoints();
 
 app.Run();

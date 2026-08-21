@@ -71,6 +71,28 @@ await bothRefuse('outlet: unknown warehouse', '/api/admin/outlets', 'POST', { co
 await bothRefuse('outlet: unknown id', '/api/admin/outlets/nope', 'PATCH', { code: 'X', name: 'X' });
 await bothRefuse('outlet: delete unknown', '/api/admin/outlets/nope', 'DELETE');
 
+await bothRefuse('currency: code "EURO"', '/api/admin/currencies', 'POST', { code: 'EURO', name: 'X', symbol: 'X', rate: 1 });
+await bothRefuse('currency: rate 0', '/api/admin/currencies', 'POST', { code: 'ZZZ', name: 'X', symbol: 'X', rate: 0 });
+await bothRefuse('currency: unknown id', '/api/admin/currencies/nope', 'PATCH', { code: 'ZZZ', name: 'X', symbol: 'X', rate: 1 });
+await bothRefuse('currency: delete unknown', '/api/admin/currencies/nope', 'DELETE');
+await bothRefuse('tier: no name', '/api/admin/client-categories', 'POST', { markupPercent: 5 });
+await bothRefuse('tier: markup "lots"', '/api/admin/client-categories', 'POST', { name: 'X', markupPercent: 'lots' });
+await bothRefuse('tier: delete unknown', '/api/admin/client-categories/nope', 'DELETE');
+await bothRefuse('rule: no label', '/api/admin/markup-rules', 'POST', { type: 'PERCENT', value: 1 });
+await bothRefuse('rule: type HALF', '/api/admin/markup-rules', 'POST', { label: 'X', type: 'HALF', value: 1 });
+await bothRefuse('rule: band ends below start', '/api/admin/markup-rules', 'POST', { label: 'X', value: 1, purchasePriceFrom: 50, purchasePriceTo: 10 });
+await bothRefuse('rule: active "no"', '/api/admin/markup-rules/nope', 'PATCH', { active: 'no' });
+await bothRefuse('rule: patch unknown', '/api/admin/markup-rules/nope', 'PATCH', { active: true });
+await bothRefuse('rule: delete unknown', '/api/admin/markup-rules/nope', 'DELETE');
+await bothRefuse('product: no part number', '/api/admin/products', 'POST', { name: 'X' });
+await bothRefuse('product: no name', '/api/admin/products', 'POST', { partNumber: 'X' });
+await bothRefuse('product: price -1', '/api/admin/products', 'POST', { partNumber: 'X', name: 'X', manufacturerId: 'a', vehicleSystemId: 'b', basePrice: -1 });
+await bothRefuse('product: unknown manufacturer', '/api/admin/products', 'POST', { partNumber: 'X', name: 'X', manufacturerId: 'nope', vehicleSystemId: 'nope', basePrice: 1 });
+await bothRefuse('product: patch unknown', '/api/admin/products/nope', 'PATCH', { partNumber: 'X', name: 'X', manufacturerId: 'a', vehicleSystemId: 'b', basePrice: 1 });
+await bothRefuse('product: delete unknown', '/api/admin/products/nope', 'DELETE');
+await bothRefuse('images: unknown product', '/api/admin/products/nope/images', 'PUT', { images: [] });
+await bothRefuse('stock: unknown product', '/api/admin/products/nope/stock', 'PUT', { levels: [] });
+
 // A supplier that is genuinely in use, and a warehouse that genuinely holds
 // stock — both refusals name a real count, so both APIs have to agree on it.
 const suppliers = (await call(NODE, '/api/admin/suppliers', 'GET')).body.suppliers;
@@ -80,6 +102,28 @@ if (sourcing) await bothRefuse('delete a supplier in use', `/api/admin/suppliers
 const warehouses = (await call(NODE, '/api/admin/warehouses', 'GET')).body.warehouses;
 const stocked = warehouses.find((w) => w.totalQuantity > 0);
 if (stocked) await bothRefuse('delete a stocked warehouse', `/api/admin/warehouses/${stocked.id}`, 'DELETE');
+
+// The base currency has to refuse three different ways, and each refusal
+// protects something different: its rate is 1 by definition, deactivating it
+// would leave every price denominated in something the catalogue no longer
+// carries, and deleting it would do both.
+const currencies = (await call(NODE, '/api/admin/currencies', 'GET')).body.currencies;
+const base = currencies.find((c) => c.isBase);
+if (base) {
+  const same_ = { code: base.code, name: base.name, symbol: base.symbol };
+  await bothRefuse('rescale the base currency', `/api/admin/currencies/${base.id}`, 'PATCH', { ...same_, rate: 2 });
+  await bothRefuse('deactivate the base', `/api/admin/currencies/${base.id}`, 'PATCH', { ...same_, rate: 1, active: false });
+  await bothRefuse('delete the base', `/api/admin/currencies/${base.id}`, 'DELETE');
+}
+
+const tiers = (await call(NODE, '/api/admin/client-categories', 'GET')).body.categories;
+const peopled = tiers.find((t) => t.clientCount > 0);
+if (peopled) await bothRefuse('delete a tier in use', `/api/admin/client-categories/${peopled.id}`, 'DELETE');
+
+// A part that is genuinely on an order line, found through the orders API so
+// this cannot fall back to deleting a real part that merely looks handy.
+const onOrder = (await call(NODE, '/api/admin/orders', 'GET')).body.orders.flatMap((o) => o.lines)[0];
+if (onOrder) await bothRefuse('delete a part on an order', `/api/admin/products/${onOrder.productId}`, 'DELETE');
 
 console.log(`\n${same}/${total} refusals identical\n`);
 

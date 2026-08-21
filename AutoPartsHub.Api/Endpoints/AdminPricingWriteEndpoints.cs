@@ -1,0 +1,347 @@
+using System.Text.Json;
+using AutoPartsHub.Api.Admin;
+using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
+using AutoPartsHub.Api.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace AutoPartsHub.Api.Endpoints;
+
+/// <summary>
+/// Writing what the catalogue is priced with: currencies, client tiers and
+/// markup rules.
+/// </summary>
+/// <remarks>
+/// The base currency is the one thing here that cannot be edited freely. It is
+/// the unit every other rate is quoted against, so its rate is 1 by definition
+/// and deactivating it would leave every price denominated in something the
+/// catalogue no longer carries.
+/// </remarks>
+public static class AdminPricingWriteEndpoints
+{
+    public static void MapAdminPricingWriteEndpoints(this IEndpointRouteBuilder app)
+    {
+        /* ------------------------------------------------- currencies --- */
+
+        app.MapPost("/api/admin/currencies", async (
+            JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var input = Validators.ReadCurrency(body);
+            if (!input.Ok) return Results.BadRequest(new { error = input.Error });
+            var c = input.Value!;
+
+            if (await db.Currencies.AnyAsync(x => x.Code == c.Code, ct))
+            {
+                return Results.Json(new { error = $"{c.Code} is already on the list." }, statusCode: 409);
+            }
+
+            // Never created as base: which currency prices are denominated in
+            // is a property of the catalogue, not something a create form gets
+            // to assert.
+            var id = Ids.New();
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO "Currency" ("id", "code", "name", "symbol", "rate", "isBase", "active")
+                VALUES ({id}, {c.Code}, {c.Name}, {c.Symbol}, {c.Rate}, FALSE, {c.Active})
+                """, ct);
+
+            return Results.Json(new { currency = await CurrencyById(db, id, ct) }, statusCode: 201);
+        });
+
+        app.MapPatch("/api/admin/currencies/{id}", async (
+            string id, JsonElement body, HttpContext http, AdminGate gate,
+            AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var existing = await CurrencyById(db, id, ct);
+            if (existing is null) return Results.NotFound(new { error = "Currency not found." });
+
+            var input = Validators.ReadCurrency(body);
+            if (!input.Ok) return Results.BadRequest(new { error = input.Error });
+            var c = input.Value!;
+
+            // The base is the unit everything else is quoted against, so its
+            // rate is 1 by definition. Editing it would rescale the entire
+            // catalogue without changing a single stored price.
+            if (existing.IsBase && c.Rate != 1)
+            {
+                return Results.Json(
+                    new { error = $"{existing.Code} is the base currency. Its rate is always 1." },
+                    statusCode: 409);
+            }
+            if (existing.IsBase && !c.Active)
+            {
+                return Results.Json(
+                    new { error = $"{existing.Code} is the base currency and cannot be deactivated." },
+                    statusCode: 409);
+            }
+
+            if (await db.Currencies.AnyAsync(x => x.Code == c.Code && x.Id != id, ct))
+            {
+                return Results.Json(new { error = $"{c.Code} is already on the list." }, statusCode: 409);
+            }
+
+            await db.Database.ExecuteSqlAsync($"""
+                UPDATE "Currency"
+                   SET "code" = {c.Code}, "name" = {c.Name}, "symbol" = {c.Symbol},
+                       "rate" = {c.Rate}, "active" = {c.Active}
+                 WHERE "id" = {id}
+                """, ct);
+
+            return Results.Ok(new { currency = await CurrencyById(db, id, ct) });
+        });
+
+        app.MapDelete("/api/admin/currencies/{id}", async (
+            string id, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var currency = await CurrencyById(db, id, ct);
+            if (currency is null) return Results.NotFound(new { error = "Currency not found." });
+
+            if (currency.IsBase)
+            {
+                return Results.Json(new
+                {
+                    error = $"{currency.Code} is the base currency — every price is denominated in it.",
+                }, statusCode: 409);
+            }
+
+            // Accounts referencing it would silently fall back to the base and
+            // be quoted different numbers than yesterday. Say so instead.
+            if (currency.ClientCount > 0)
+            {
+                return Results.Json(new
+                {
+                    error = $"{currency.Code} is used by {currency.ClientCount} " +
+                            $"account{(currency.ClientCount == 1 ? "" : "s")}. " +
+                            "Move them to another currency first.",
+                }, statusCode: 409);
+            }
+
+            // Past orders keep their own copy of the code and rate, so deleting
+            // a currency no account uses cannot disturb order history.
+            await db.Database.ExecuteSqlAsync($"""DELETE FROM "Currency" WHERE "id" = {id}""", ct);
+            return Results.Ok(new { ok = true });
+        });
+
+        /* ----------------------------------------------- client tiers --- */
+
+        app.MapPost("/api/admin/client-categories", async (
+            JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var name = JsonValues.AsString(JsonValues.Get(body, "name")).Trim();
+            if (name.Length == 0) return Results.BadRequest(new { error = "Name is required." });
+
+            var markup = JsonValues.AsNumber(JsonValues.Get(body, "markupPercent")) ?? double.NaN;
+            var minOrder = JsonValues.AsNumber(JsonValues.Get(body, "minOrderAmount")) ?? double.NaN;
+            var shelfRaw = JsonValues.Get(body, "shelfLifeDays");
+            var shelf = shelfRaw is null ? 1 : JsonValues.AsNumber(shelfRaw) ?? double.NaN;
+
+            if (double.IsNaN(markup) || double.IsInfinity(markup)
+                || double.IsNaN(minOrder) || double.IsInfinity(minOrder)
+                || double.IsNaN(shelf) || double.IsInfinity(shelf))
+            {
+                return Results.BadRequest(
+                    new { error = "Markup, minimum order and shelf life must be numbers." });
+            }
+
+            var id = Ids.New();
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO "ClientCategory" ("id", "name", "markupPercent", "minOrderAmount", "shelfLifeDays")
+                VALUES ({id}, {name}, {markup}, {minOrder}, {(int)shelf})
+                """, ct);
+
+            return Results.Json(new
+            {
+                category = new
+                {
+                    id,
+                    name,
+                    markupPercent = markup,
+                    minOrderAmount = minOrder,
+                    shelfLifeDays = (int)shelf,
+                    clientCount = 0,
+                },
+            }, statusCode: 201);
+        });
+
+        app.MapDelete("/api/admin/client-categories/{id}", async (
+            string id, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var name = await db.ClientCategories.Where(c => c.Id == id).Select(c => c.Name)
+                .FirstOrDefaultAsync(ct);
+            if (name is null) return Results.NotFound(new { error = "Category not found." });
+
+            // Client.categoryId and MarkupRule.clientCategoryId both reference
+            // this row, so deleting it out from under them fails at the
+            // database. Say why instead of surfacing a foreign-key error.
+            var clients = await db.Clients.CountAsync(c => c.CategoryId == id, ct);
+            if (clients > 0)
+            {
+                return Results.Json(new
+                {
+                    error = $"{name} still has {clients} client{(clients == 1 ? "" : "s")}. " +
+                            "Move them to another tier first.",
+                }, statusCode: 409);
+            }
+
+            var rules = await db.MarkupRules.CountAsync(r => r.ClientCategoryId == id, ct);
+            if (rules > 0)
+            {
+                return Results.Json(new
+                {
+                    error = $"{name} is used by {rules} markup rule{(rules == 1 ? "" : "s")}. " +
+                            "Delete or retarget those first.",
+                }, statusCode: 409);
+            }
+
+            await db.Database.ExecuteSqlAsync($"""DELETE FROM "ClientCategory" WHERE "id" = {id}""", ct);
+            return Results.Ok(new { ok = true });
+        });
+
+        /* ----------------------------------------------- markup rules --- */
+
+        app.MapPost("/api/admin/markup-rules", async (
+            JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var label = JsonValues.AsString(JsonValues.Get(body, "label")).Trim();
+            if (label.Length == 0) return Results.BadRequest(new { error = "Label is required." });
+
+            var type = JsonValues.Get(body, "type") is { } t
+                ? JsonValues.AsString(t) : "PERCENT";
+            if (type.Length == 0) type = "PERCENT";
+            if (type is not ("PERCENT" or "AMOUNT" or "FIXED"))
+            {
+                return Results.BadRequest(
+                    new { error = "Adjustment type must be PERCENT, AMOUNT or FIXED." });
+            }
+
+            var value = JsonValues.AsNumber(JsonValues.Get(body, "value")) ?? double.NaN;
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                return Results.BadRequest(new { error = "Value must be a number." });
+            }
+
+            string? OptText(string key) =>
+                JsonValues.AsString(JsonValues.Get(body, key)).Trim() is { Length: > 0 } v ? v : null;
+            double? OptNum(string key)
+            {
+                var raw = JsonValues.Get(body, key);
+                if (raw is null || raw.Value.ValueKind is JsonValueKind.Null
+                    || (raw.Value.ValueKind == JsonValueKind.String && raw.Value.GetString()!.Length == 0))
+                {
+                    return null;
+                }
+                var n = JsonValues.AsNumber(raw);
+                return n is null || double.IsNaN(n.Value) || double.IsInfinity(n.Value) ? null : n;
+            }
+
+            var from = OptNum("purchasePriceFrom");
+            var to = OptNum("purchasePriceTo");
+            if (from is not null && to is not null && from > to)
+            {
+                return Results.BadRequest(new { error = "Price band starts above where it ends." });
+            }
+
+            var id = Ids.New();
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO "MarkupRule" ("id", "label", "priority", "clientCategoryId", "supplierId",
+                                          "manufacturerName", "vehicleSystemSlug", "partNumberPrefix",
+                                          "purchasePriceFrom", "purchasePriceTo", "type", "value")
+                VALUES ({id}, {label}, {(int)(OptNum("priority") ?? 0)}, {OptText("clientCategoryId")},
+                        {OptText("supplierId")}, {OptText("manufacturerName")},
+                        {OptText("vehicleSystemSlug")}, {OptText("partNumberPrefix")},
+                        {from}, {to}, {type}, {value})
+                """, ct);
+
+            return Results.Json(new { rule = await MarkupRuleById(db, id, ct) }, statusCode: 201);
+        });
+
+        // PATCH /api/admin/markup-rules/<id> { active }
+        app.MapPatch("/api/admin/markup-rules/{id}", async (
+            string id, JsonElement body, HttpContext http, AdminGate gate,
+            AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var raw = JsonValues.Get(body, "active");
+            if (raw is not { ValueKind: JsonValueKind.True or JsonValueKind.False })
+            {
+                return Results.BadRequest(new { error = "active must be true or false." });
+            }
+            var active = raw.Value.ValueKind == JsonValueKind.True;
+
+            if (!await db.MarkupRules.AnyAsync(r => r.Id == id, ct))
+            {
+                return Results.NotFound(new { error = "Rule not found." });
+            }
+
+            await db.Database.ExecuteSqlAsync(
+                $"""UPDATE "MarkupRule" SET "active" = {active} WHERE "id" = {id}""", ct);
+
+            return Results.Ok(new { id, active });
+        });
+
+        app.MapDelete("/api/admin/markup-rules/{id}", async (
+            string id, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            if (!await db.MarkupRules.AnyAsync(r => r.Id == id, ct))
+            {
+                return Results.NotFound(new { error = "Rule not found." });
+            }
+
+            await db.Database.ExecuteSqlAsync($"""DELETE FROM "MarkupRule" WHERE "id" = {id}""", ct);
+            return Results.Ok(new { ok = true });
+        });
+    }
+
+    private static async Task<AdminCurrencyRow?> CurrencyById(
+        AutoPartsContext db, string id, CancellationToken ct) =>
+        (await db.Database.SqlQuery<AdminCurrencyRow>($"""
+            SELECT c."id" AS "Id", c."code" AS "Code", c."name" AS "Name", c."symbol" AS "Symbol",
+                   c."rate" AS "Rate", c."isBase" AS "IsBase", c."active" AS "Active",
+                   n."count"::int AS "ClientCount"
+            FROM "Currency" c
+            LEFT JOIN LATERAL (
+              SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."currencyId" = c."id"
+            ) n ON TRUE
+            WHERE c."id" = {id}
+            """).ToListAsync(ct)).FirstOrDefault();
+
+    private static async Task<AdminMarkupRuleRow?> MarkupRuleById(
+        AutoPartsContext db, string id, CancellationToken ct) =>
+        (await db.Database.SqlQuery<AdminMarkupRuleRow>($"""
+            SELECT r."id" AS "Id", r."label" AS "Label", r."priority" AS "Priority",
+                   r."clientCategoryId" AS "ClientCategoryId", cc."name" AS "ClientCategoryName",
+                   r."supplierId" AS "SupplierId", s."name" AS "SupplierName",
+                   r."manufacturerName" AS "ManufacturerName",
+                   r."vehicleSystemSlug" AS "VehicleSystemSlug",
+                   r."partNumberPrefix" AS "PartNumberPrefix",
+                   r."purchasePriceFrom" AS "PurchasePriceFrom",
+                   r."purchasePriceTo" AS "PurchasePriceTo",
+                   r."type" AS "Type", r."value" AS "Value", r."active" AS "Active"
+            FROM "MarkupRule" r
+            LEFT JOIN "ClientCategory" cc ON cc."id" = r."clientCategoryId"
+            LEFT JOIN "Supplier" s ON s."id" = r."supplierId"
+            WHERE r."id" = {id}
+            """).ToListAsync(ct)).FirstOrDefault();
+}
