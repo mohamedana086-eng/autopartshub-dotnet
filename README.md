@@ -16,7 +16,7 @@ C:\Users\Aio\autopartshub-dotnet\  this
   because they read the same rows.
 - **EF Core**, with raw SQL where LINQ cannot reach — see below.
 - **Hosting is not decided.** Vercel does not run .NET. The code takes its
-  configuration from environment variables and will ship with a Dockerfile, so
+  configuration from environment variables and ships with a Dockerfile, so
   Azure, Railway, Fly or a VPS are all still open.
 
 ## Running it
@@ -36,6 +36,83 @@ own `Host=…;Database=…` form; see `Data/ConnectionString.cs`.
 GET /health      the process is up
 GET /health/db   it can reach the database, and how many products it can see
 ```
+
+## The container
+
+```bash
+docker build -t autopartshub-api .
+docker run --rm -p 8080:8080 \
+  -e DATABASE_URL="postgresql://..." \
+  -e AUTH_SECRET="$(openssl rand -hex 32)" \
+  autopartshub-api
+```
+
+Nothing in the image names a host. Everything that differs between Azure,
+Railway, Fly and a VPS arrives as an environment variable, so the same image
+runs wherever the decision lands.
+
+Two things in it are not obvious and both would fail quietly rather than
+loudly, which is why each has a guard in `Program.cs`:
+
+**ICU has to be present.** The catalogue is ordered with culture-aware
+comparisons because the API this one replaces uses JavaScript's
+`localeCompare`, which treats case as a secondary weight — an ordinal sort puts
+"CV joint kit" before "Cabin filter". A runtime image without ICU turns on
+globalization-invariant mode, which converts every `InvariantCulture`
+comparison back into an ordinal one and says nothing. The app would start, the
+health check would pass, and search results would come back shuffled. Hence
+`aspnet:10.0-noble-chiseled-extra` rather than the bare chiseled image, and
+hence a startup check that refuses to run in invariant mode.
+
+**`PORT`, not `ASPNETCORE_HTTP_PORTS`.** Railway, Render and Cloud Run assign a
+port and announce it in `PORT`; none of them read `EXPOSE`. Kestrel does not
+read `PORT`. Joining the two up in the image by baking in
+`ASPNETCORE_HTTP_PORTS=8080` is the obvious move and the wrong one — a default
+under a name the host does not set outranks the port it actually assigned, and
+the container listens politely where nobody is looking. The image sets `PORT`
+instead, so a host overrides it just by doing what it already does. Precedence
+is `ASPNETCORE_URLS`, then `PORT`.
+
+### What running in Production changes
+
+| | |
+|---|---|
+| `.env` | not read at all — configuration comes from the environment |
+| `/dev/*` probes | not mapped; all five return 404 |
+| OpenAPI | not mapped |
+| the session cookie | marked `Secure` |
+| a missing, placeholder or short `AUTH_SECRET` | the process exits at startup |
+
+That last one matters more than it reads. A deployment that came up signing
+cookies with the published placeholder would work perfectly and let anyone mint
+an admin session, so it is a crash rather than a warning. All three cases were
+checked against the published build: each exits non-zero with the sentence
+naming the fix.
+
+### What has been checked, and what has not
+
+The image itself has **not** been built — there is no Docker on the machine
+this was written on. What was checked is everything inside it: the exact
+`dotnet publish -c Release` the Dockerfile runs, and that build served under
+`ASPNETCORE_ENVIRONMENT=Production` with `PORT` set and no `.env` present, with
+the whole comparison suite run against it — 232 reads and 49 admin writes, all
+identical to the API in production today. Container layering is the part still
+to prove.
+
+### Hosting
+
+Not decided. What the decision turns on:
+
+- **The database is on AWS `us-east-1`.** Every request makes several round
+  trips to it, so the region matters more than which company runs the host.
+- **The storefront reaches the API through a Vercel rewrite**, which is a
+  server-side proxy — the browser only ever sees the storefront's own origin.
+  So switching over is one line in `web/vercel.json`, the session cookie keeps
+  working untouched, CORS never enters into it, and rolling back is the same
+  one line.
+- **Do not enable scale-to-zero.** A .NET container takes a couple of seconds
+  to start, and with the proxy hop in front of it the first customer after a
+  quiet spell waits for all of it.
 
 ## The model
 

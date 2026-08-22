@@ -1,0 +1,26 @@
+# Build output and local state. Copying bin/ and obj/ into the build stage is
+# the classic way to get a container that mysteriously runs yesterday's code:
+# the host's artefacts land on top of the ones the image just built, and they
+# were compiled for a different machine.
+**/bin/
+**/obj/
+
+# Secrets. .env is gitignored too, and the container reads its configuration
+# from real environment variables — but the two protections are worth having
+# separately, because a build context is not a git checkout.
+**/.env
+**/.env.*
+!**/.env.example
+
+# Not part of the image. The tests and the comparison scripts run against a
+# live pair of APIs on a developer's machine; the container serves.
+AutoPartsHub.Tests/
+tools/
+*.slnx
+
+.git/
+.gitignore
+.github/
+README.md
+*.log
+*.log.err

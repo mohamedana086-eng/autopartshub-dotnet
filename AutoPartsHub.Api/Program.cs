@@ -6,7 +6,42 @@ using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Pricing;
 using Microsoft.EntityFrameworkCore;
 
+// The catalogue is ordered with culture-aware comparisons, because that is
+// what the API this one replaces does: JavaScript's localeCompare treats case
+// as a secondary weight, so an ordinal sort puts "CV joint kit" before "Cabin
+// filter" and a customer's results come back shuffled. That bug has been
+// fixed here once already.
+//
+// Globalization-invariant mode turns every InvariantCulture comparison back
+// into an ordinal one without saying so, and several slim container images
+// turn it on by shipping without ICU. Nothing downstream would notice — the
+// app starts, the health check passes, and the search quietly sorts wrong —
+// so it is refused here instead.
+if (AppContext.TryGetSwitch("System.Globalization.Invariant", out var invariant) && invariant)
+{
+    throw new InvalidOperationException(
+        "Globalization-invariant mode is on, which would reorder the catalogue. "
+        + "The image needs ICU: use the Debian-based runtime, or the -extra "
+        + "variant of a chiseled one.");
+}
+
 var builder = WebApplication.CreateBuilder(args);
+
+// Hosts that choose the port announce it in PORT — Railway, Render, Cloud Run
+// and Heroku all do, and none of them read EXPOSE. Kestrel does not look at
+// PORT, so the two are joined up here rather than in a shell wrapper around
+// the entrypoint.
+//
+// Precedence is ASPNETCORE_URLS, then PORT. Nothing else may sit in between:
+// the Dockerfile deliberately does not set ASPNETCORE_HTTP_PORTS, because a
+// default baked into the image would outrank the port the host actually
+// assigned and the container would listen where nobody is looking. It sets
+// PORT instead, which a host overrides simply by setting its own.
+if (Environment.GetEnvironmentVariable("PORT") is { Length: > 0 } port
+    && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
 
 // Before anything reads configuration. In a deployment there is no file and
 // this does nothing; locally it is what makes `dotnet run` work unattended.
