@@ -133,7 +133,23 @@ for (const qs of [
   "supplier=ib16-parts",
   "supplier=nope",
   "q=brake&system=brake-system&manufacturer=BOSCH&sort=price-asc",
-  "q=0986&matchIn=part-number&minRating=3&returns=true"
+  "q=0986&matchIn=part-number&minRating=3&returns=true",
+  // Part type. Its counts have to stay put under its own filter, so each of
+  // these compares the facet as well as the results.
+  "partType=oem",
+  "partType=aftermarket",
+  "partType=substitute",
+  "partType=oem,aftermarket",
+  "partType=aftermarket,oem",          // the order asked in must not change the answer
+  "partType=nonsense",                 // dropped entirely, so this means "any"
+  "partType=oem,nonsense",
+  "partType=",
+  "system=brake-system&partType=oem",
+  // The two filters answering opposite questions about the same rows: found BY
+  // an OE number, and every one of them aftermarket.
+  "q=34 11 6 794 917&matchIn=oem",
+  "q=34 11 6 794 917&partType=oem",
+  "q=34 11 6 794 917&partType=aftermarket"
 ]) {
   for (const who of ['anonymous', 'retail', 'admin']) {
     GROUPS.search.push([who, '/api/catalog/search' + (qs ? '?' + qs : '?q=')]);

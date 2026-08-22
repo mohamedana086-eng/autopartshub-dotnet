@@ -43,6 +43,7 @@ public static class AdminCatalogueWriteEndpoints
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                        p."description" AS "Description", p."basePrice" AS "BasePrice",
                        p."stockDays" AS "StockDays",
+                       p."partType" AS "PartType",
                        p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                        p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                        p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
@@ -123,9 +124,10 @@ public static class AdminCatalogueWriteEndpoints
             var id = Ids.New();
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "Product" ("id", "partNumber", "name", "description", "manufacturerId",
-                                       "vehicleSystemId", "supplierId", "basePrice", "stockDays")
+                                       "vehicleSystemId", "supplierId", "basePrice", "stockDays", "partType")
                 VALUES ({id}, {p.PartNumber}, {p.Name}, {p.Description}, {p.ManufacturerId},
-                        {p.VehicleSystemId}, {p.SupplierId}, {p.BasePrice}, {stockDays})
+                        {p.VehicleSystemId}, {p.SupplierId}, {p.BasePrice}, {stockDays},
+                        {p.PartType})
                 """, ct);
 
             return Results.Json(new { product = await ProductById(db, id, ct) }, statusCode: 201);
@@ -169,7 +171,8 @@ public static class AdminCatalogueWriteEndpoints
                    SET "partNumber" = {p.PartNumber}, "name" = {p.Name},
                        "description" = {p.Description}, "manufacturerId" = {p.ManufacturerId},
                        "vehicleSystemId" = {p.VehicleSystemId}, "supplierId" = {p.SupplierId},
-                       "basePrice" = {p.BasePrice}, "stockDays" = {stockDays}
+                       "basePrice" = {p.BasePrice}, "stockDays" = {stockDays},
+                       "partType" = {p.PartType}
                  WHERE "id" = {id}
                 """, ct);
 
@@ -356,6 +359,7 @@ public static class AdminCatalogueWriteEndpoints
             SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                    p."description" AS "Description", p."basePrice" AS "BasePrice",
                    p."stockDays" AS "StockDays",
+                   p."partType" AS "PartType",
                    p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                    p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                    p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
@@ -422,8 +426,10 @@ public static class AdminCatalogueWriteEndpoints
 /// left. SUM over no shelves is null, and the distinction survives the query
 /// rather than being reconstructed afterwards.
 /// </param>
+/// <param name="PartType">oem | aftermarket | substitute — what the customer would be buying.</param>
 public record AdminProductRow(
     string Id, string PartNumber, string Name, string? Description, double BasePrice, int StockDays,
+    string PartType,
     string ManufacturerId, string ManufacturerName, string VehicleSystemId, string SystemName,
     string? SupplierId, string? SupplierName,
     int InterchangeCount, int ImageCount, string? PrimaryImageUrl,

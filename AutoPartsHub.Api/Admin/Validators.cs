@@ -242,9 +242,18 @@ public static class Validators
             stockDays = (int)days!.Value;
         }
 
+        // Absent means aftermarket, matching the column's own default, so a
+        // client that predates this field still writes a valid row rather than
+        // failing.
+        var partType = Text(body, "partType") is { Length: > 0 } t ? t : "aftermarket";
+        if (!PartTypes.All.Contains(partType))
+        {
+            return Fail<ProductInput>($"Part type must be one of {string.Join(", ", PartTypes.All)}.");
+        }
+
         return Ok(new ProductInput(
             partNumber, name, Optional(body, "description"), manufacturerId, vehicleSystemId,
-            Optional(body, "supplierId"), basePrice.Value, stockDays));
+            Optional(body, "supplierId"), basePrice.Value, stockDays, partType));
     }
 
     /// <summary>
@@ -391,7 +400,24 @@ public record CurrencyInput(string Code, string Name, string Symbol, double Rate
 
 public record ProductInput(
     string PartNumber, string Name, string? Description, string ManufacturerId,
-    string VehicleSystemId, string? SupplierId, double BasePrice, int? StockDays);
+    string VehicleSystemId, string? SupplierId, double BasePrice, int? StockDays,
+    string PartType);
+
+/// <summary>
+/// The three kinds a part can be.
+/// </summary>
+/// <remarks>
+/// Its own type rather than three strings in the validator, because the search
+/// endpoint and the storefront read the same list — and a fourth kind added in
+/// one place and rejected in another is the kind of split nothing catches
+/// until a form refuses a value the filter is already offering.
+/// </remarks>
+public static class PartTypes
+{
+    public static readonly string[] All = ["oem", "aftermarket", "substitute"];
+
+    public static bool IsKnown(string value) => All.Contains(value);
+}
 
 public record ImageInput(string Url, string? Alt);
 

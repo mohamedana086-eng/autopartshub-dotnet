@@ -16,6 +16,7 @@ public static class ProductEndpoints
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                        p."description" AS "Description", p."stockDays" AS "StockDays",
                        p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
+                       p."partType" AS "PartType",
                        m."name" AS "ManufacturerName",
                        v."name" AS "SystemName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice",
@@ -110,6 +111,8 @@ public record ProductDetailRow(
     int StockDays,
     double BasePrice,
     string? SupplierId,
+    /// <summary>oem | aftermarket | substitute — what the customer would be buying.</summary>
+    string PartType,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,

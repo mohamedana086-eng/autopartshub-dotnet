@@ -17,6 +17,20 @@ public static class SearchEndpoints
     /// </remarks>
     private static readonly string[] MatchIns = ["part-number", "oem", "aftermarket"];
 
+    /// <summary>
+    /// What the part IS, which is a different question from which number found it.
+    /// </summary>
+    /// <remarks>
+    /// <c>MatchIns</c> above asks where the search looked. This asks what the
+    /// customer would be buying. Searching an OE number normally returns
+    /// aftermarket parts — that is the entire purpose of cross-references — so
+    /// a single filter answering both would answer neither.
+    ///
+    /// Ordered maker-first, which is how a customer ranks them and how the UI
+    /// lists them.
+    /// </remarks>
+    private static readonly string[] PartTypes = ["oem", "aftermarket", "substitute"];
+
     private const int MaxResults = 200;
 
     // GET /api/catalog/search?q=&system=&manufacturer=&sort=&limit=
@@ -60,6 +74,16 @@ public static class SearchEndpoints
             var requested = query["matchIn"].ToString().Split(',')
                 .Select(v => v.Trim()).Where(v => v.Length > 0).ToHashSet();
             var matchIn = q.Length > 0 ? MatchIns.Where(requested.Contains).ToArray() : [];
+
+            // Which kinds of part to show. Unlike matchIn this is meaningful
+            // with nothing typed — "show me the genuine ones in this system" is
+            // a question a customer asks while browsing. Empty means all three,
+            // because a filter nobody has touched should not be quietly
+            // removing anything. Ordered by PartTypes so the same selection
+            // always echoes back the same way.
+            var requestedTypes = query["partType"].ToString().Split(',')
+                .Select(v => v.Trim()).Where(v => v.Length > 0).ToHashSet();
+            var partType = PartTypes.Where(requestedTypes.Contains).ToArray();
 
             var sort = Sorts.Contains(query["sort"].ToString()) ? query["sort"].ToString() : "relevance";
 
@@ -155,6 +179,20 @@ public static class SearchEndpoints
                 ratingCounts[key] = ratingCounts.GetValueOrDefault(key) + 1;
             }
 
+            // Counted on inSystem alongside the brand and rating facets, and so
+            // before the part-type filter narrows anything: a count already
+            // narrowed by its own filter says "3 genuine" when genuine is the
+            // only thing selected, which tells the customer nothing about what
+            // unticking it would show.
+            //
+            // Every part has exactly one type, so unlike the matchIn counts
+            // these sum to the result count rather than overlapping.
+            var partTypeCounts = new Dictionary<string, int>();
+            foreach (var p in inSystem)
+            {
+                partTypeCounts[p.PartType] = partTypeCounts.GetValueOrDefault(p.PartType) + 1;
+            }
+
             var reliabilityCounts = new Dictionary<string, int>();
             var returnsCount = 0;
             foreach (var p in inSystem)
@@ -193,6 +231,10 @@ public static class SearchEndpoints
                 .Where(p => minRating is null || (p.SupplierRating ?? 0) >= minRating)
                 .Where(p => reliability is null || p.SupplierReliability == reliability)
                 .Where(p => !returnsOnly || p.SupplierAcceptsReturns == true)
+                // Any of the selected kinds is enough. They are alternatives a
+                // customer is willing to accept — "genuine or aftermarket, but
+                // not a substitute" — and no part could satisfy two at once.
+                .Where(p => partType.Length == 0 || partType.Contains(p.PartType))
                 .Select((p, index) =>
                 {
                     var normalisedPart = PartNumbers.Normalise(p.PartNumber);
@@ -244,6 +286,7 @@ public static class SearchEndpoints
 
                     return new Scored(rank, HitsFor(p), new SearchProductDto(
                         p.Id, p.PartNumber, p.Name, p.ManufacturerName, p.SystemName, p.SystemSlug,
+                        p.PartType,
                         p.StockDays,
                         priced?.FinalPrice ?? RequestPricing.PurchasePrice(p),
                         priced?.AppliedRule,
@@ -324,6 +367,7 @@ public static class SearchEndpoints
                 reliability,
                 returns = returnsOnly,
                 matchIn,
+                partType,
                 minPrice,
                 maxPrice,
                 sort,
@@ -360,6 +404,16 @@ public static class SearchEndpoints
                     matchIn = q.Length > 0
                         ? MatchIns.Select(name => new { name, count = matchCounts[name] })
                         : [],
+                    /* What the results are, and how many of each. All three
+                       always, zeros included, maker first rather than by count.
+                       Like matchIn these are options a customer picks rather
+                       than facets that appear when convenient, and "genuine 0"
+                       is the answer to "are any of these genuine?" — an empty
+                       space is not. Present with or without a query, because
+                       this is a property of the parts rather than of the
+                       search. */
+                    partTypes = PartTypes.Select(
+                        name => new { name, count = partTypeCounts.GetValueOrDefault(name) }),
                 },
                 products = withinPrice.Take(limit).Select(s => s.Product),
             });
@@ -381,6 +435,12 @@ public record SearchProductDto(
     string Manufacturer,
     string System,
     string SystemSlug,
+    /// <summary>
+    /// What the customer would be buying, on every row rather than only on the
+    /// ones the filter is currently showing — the badge is there to be read
+    /// when nothing is filtered at all.
+    /// </summary>
+    string PartType,
     int StockDays,
     double Price,
     string? AppliedRule,
