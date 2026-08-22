@@ -120,6 +120,7 @@ app.MapGet("/health/db", async (AutoPartsContext db) =>
 
 app.MapCatalogueEndpoints();
 app.MapSupplierPageEndpoints();
+app.MapSupplierSignupEndpoints();
 app.MapBulkLookupEndpoints();
 app.MapVehicleEndpoints();
 app.MapAuthEndpoints();

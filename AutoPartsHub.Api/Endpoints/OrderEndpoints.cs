@@ -136,6 +136,14 @@ public static class OrderEndpoints
                   ON pli."productId" = p."id"
                  AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
                 WHERE p."id" = ANY({ids}::text[])
+                -- A switched-off supplier's part is not orderable. Dropping it
+                -- here rather than refusing separately is deliberate: the
+                -- caller already compares this count against what was asked
+                -- for and answers "a part in your cart is no longer in the
+                -- catalogue", which is exactly the case.
+                AND (p."supplierId" IS NULL OR EXISTS (
+                  SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
+                ))
                 """).ToListAsync(ct);
 
             if (products.Count != wanted.Count)

@@ -71,13 +71,22 @@ public static class Roles
 {
     public const string Admin = "ADMIN";
     public const string Sales = "SALES";
+    /// <summary>An account that speaks for a supplier — see Client.supplierId.</summary>
+    public const string SupplierRole = "SUPPLIER";
     public const string B2B = "B2B";
     public const string Retail = "RETAIL";
 
     public static string Narrow(string? value) =>
-        value is Admin or Sales or B2B ? value : Retail;
+        value is Admin or Sales or SupplierRole or B2B ? value : Retail;
 
-    /// <summary>Staff see the admin panel; what they see inside is scoped.</summary>
+    /// <summary>
+    /// Staff see the admin panel; what they see inside is scoped.
+    /// </summary>
+    /// <remarks>
+    /// SUPPLIER is deliberately not staff. Selling through this shop is not
+    /// the same as working in it, and the admin panel carries every customer's
+    /// orders and every supplier's costs.
+    /// </remarks>
     public static bool IsStaff(string? role) => Narrow(role) is Admin or Sales;
 
     public static bool IsAdmin(string? role) => Narrow(role) == Admin;

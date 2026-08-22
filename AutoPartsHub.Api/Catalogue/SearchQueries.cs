@@ -119,6 +119,12 @@ public sealed class SearchQueries(AutoPartsContext db)
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
             AND ({supplier}::text IS NULL OR s."slug" = {supplier})
+            -- A supplier who is switched off is not selling, so their parts
+            -- leave the catalogue entirely. That is what lets one sign up,
+            -- load a whole range and price it, and have none of it on sale
+            -- until an admin approves them. Parts with no supplier at all are
+            -- the catalogue's own and stay.
+            AND (p."supplierId" IS NULL OR s."active")
             LIMIT {limit}
             """).ToListAsync(ct);
     }
@@ -167,6 +173,10 @@ public sealed class SearchQueries(AutoPartsContext db)
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
             AND ({supplier}::text IS NULL OR s."slug" = {supplier})
+            -- Same rule as the search above. Reached by id rather than by
+            -- matching, which is exactly why it has to be repeated: a fuzzy
+            -- match that skipped the check would be a way round it.
+            AND (p."supplierId" IS NULL OR s."active")
             """).ToListAsync(ct);
     }
 

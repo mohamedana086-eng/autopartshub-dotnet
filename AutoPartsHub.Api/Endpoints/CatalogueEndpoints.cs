@@ -33,6 +33,11 @@ public static class CatalogueEndpoints
         app.MapGet("/api/suppliers", async (AutoPartsContext db) =>
         {
             var suppliers = await db.Suppliers
+                // The public directory lists who is trading. One waiting for
+                // approval has no page and no entry: the whole point of
+                // arriving switched off is that nothing shows until an admin
+                // says so.
+                .Where(s => s.Active)
                 .OrderBy(s => s.Name)
                 .Select(s => new SupplierDto(
                     s.Id, s.Code, s.Slug, s.Name, s.Description, s.Reliability,

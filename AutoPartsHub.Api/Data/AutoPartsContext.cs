@@ -42,7 +42,6 @@ public partial class AutoPartsContext : DbContext
 
     public virtual DbSet<PriceListItem> PriceListItems { get; set; }
 
-
     public virtual DbSet<Product> Products { get; set; }
 
     public virtual DbSet<ProductImage> ProductImages { get; set; }
@@ -132,6 +131,8 @@ public partial class AutoPartsContext : DbContext
 
             entity.HasIndex(e => e.SalesManagerId, "Client_salesManagerId_idx");
 
+            entity.HasIndex(e => e.SupplierId, "Client_supplierId_idx");
+
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.CategoryId).HasColumnName("categoryId");
             entity.Property(e => e.City).HasColumnName("city");
@@ -148,6 +149,7 @@ public partial class AutoPartsContext : DbContext
                 .HasDefaultValueSql("'RETAIL'::text")
                 .HasColumnName("role");
             entity.Property(e => e.SalesManagerId).HasColumnName("salesManagerId");
+            entity.Property(e => e.SupplierId).HasColumnName("supplierId");
 
             entity.HasOne(d => d.Category).WithMany(p => p.Clients)
                 .HasForeignKey(d => d.CategoryId)
@@ -163,6 +165,11 @@ public partial class AutoPartsContext : DbContext
                 .HasForeignKey(d => d.SalesManagerId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("Client_salesManagerId_fkey");
+
+            entity.HasOne(d => d.Supplier).WithMany(p => p.Clients)
+                .HasForeignKey(d => d.SupplierId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("Client_supplierId_fkey");
         });
 
         modelBuilder.Entity<ClientCategory>(entity =>
@@ -614,8 +621,16 @@ public partial class AutoPartsContext : DbContext
 
             entity.HasIndex(e => e.Slug, "Supplier_slug_key").IsUnique();
 
+            entity.HasIndex(e => e.Active, "Supplier_waiting_idx").HasFilter("(active = false)");
+
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AcceptsReturns).HasColumnName("acceptsReturns");
+            entity.Property(e => e.Active)
+                .HasDefaultValue(true)
+                .HasColumnName("active");
+            entity.Property(e => e.ApprovedAt)
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("approvedAt");
             entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.Country).HasColumnName("country");
             entity.Property(e => e.DefaultStockDays).HasColumnName("defaultStockDays");

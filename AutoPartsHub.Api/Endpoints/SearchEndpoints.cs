@@ -106,8 +106,16 @@ public static class SearchEndpoints
                     // Keep the order the similarity scoring produced.
                     var rankById = closeIds.Select((id, i) => (id, i)).ToDictionary(x => x.id, x => x.i);
                     close.Sort((a, b) => rankById.GetValueOrDefault(a.Id).CompareTo(rankById.GetValueOrDefault(b.Id)));
-                    matches = close;
-                    fuzzy = true;
+                    // Only claim a near-miss if one survived. The scoring runs
+                    // over the whole table, so every id it liked can belong to
+                    // a switched-off supplier and be filtered out on the way
+                    // back — and "did you mean" above an empty list is the UI
+                    // saying it found something it did not.
+                    if (close.Count > 0)
+                    {
+                        matches = close;
+                        fuzzy = true;
+                    }
                 }
             }
 

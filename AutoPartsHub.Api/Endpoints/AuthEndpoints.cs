@@ -153,7 +153,7 @@ public static class AuthEndpoints
     }
 
     /// <summary>The cost the accounts already in the table were hashed at.</summary>
-    private const int BcryptRounds = 10;
+    internal const int BcryptRounds = 10;
 
     /// <summary>
     /// A valid bcrypt hash of a value nothing will ever submit.
@@ -167,7 +167,9 @@ public static class AuthEndpoints
     /// </remarks>
     private const string BcryptDecoy = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
-    private static void Issue(HttpContext http, SessionTokens tokens, IHostEnvironment env, SessionPayload payload)
+    /// <summary>Sets the session cookie. Internal to the assembly: the supplier
+    /// signup issues one too, and two copies of these flags would drift.</summary>
+    internal static void Issue(HttpContext http, SessionTokens tokens, IHostEnvironment env, SessionPayload payload)
     {
         http.Response.Cookies.Append(SessionTokens.CookieName, tokens.Encode(payload), new CookieOptions
         {

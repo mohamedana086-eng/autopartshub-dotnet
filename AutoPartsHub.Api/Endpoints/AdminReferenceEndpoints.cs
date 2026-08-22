@@ -34,6 +34,7 @@ public static class AdminReferenceEndpoints
                        s."defaultStockDays" AS "DefaultStockDays",
                        s."purchaseCurrencyId" AS "PurchaseCurrencyId",
                        c."code" AS "PurchaseCurrencyCode",
+                       s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
                        p."count"::int AS "ProductCount"
                 FROM "Supplier" s
                 LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"
@@ -318,10 +319,21 @@ public static class AdminReferenceEndpoints
 
 public record NamedOption(string Id, string Name);
 
+/// <param name="Active">Whether they are trading. False hides every part of theirs from the shop.</param>
+/// <param name="ApprovedAt">
+/// When they were let in, or null if they never have been.
+///
+/// A string, formatted in the query, rather than a DateTime. The other API
+/// serialises a Date, which JSON.stringify writes as an ISO instant with three
+/// fractional digits and a Z; System.Text.Json writes neither the Z nor the
+/// same precision. This row goes to the client as it stands rather than
+/// through a serialiser that could fix it up on the way out.
+/// </param>
 public record AdminSupplierRow(
     string Id, string Code, string Slug, string Name, string? Description, string Reliability,
     int? Rating, bool? AcceptsReturns, string? Country, int? GuaranteeMonths,
-    int? DefaultStockDays, string? PurchaseCurrencyId, string? PurchaseCurrencyCode, int ProductCount);
+    int? DefaultStockDays, string? PurchaseCurrencyId, string? PurchaseCurrencyCode,
+    bool Active, string? ApprovedAt, int ProductCount);
 
 public record AdminWarehouseRow(
     string Id, string Code, string Name, string? City, string? Address, bool Active, int Priority,

@@ -172,7 +172,7 @@ differences. The generator is seeded, so a failure can be re-run.
 
 ## Progress
 
-**All 63 endpoints are ported.** Every one has been sent the same requests as
+**All 66 endpoints are ported.** Every one has been sent the same requests as
 the API already serving customers, and answered the same way.
 
 Reads, compared request for request across three sessions each — anonymous, a
@@ -196,11 +196,14 @@ Writes, each with a test that creates what it touches and takes it away again:
 - `PATCH /api/admin/orders/{id}` — the status, and the shelves with it
 - `PUT /api/cart`, `POST /api/orders`, `POST`/`PATCH /api/notifications`
 - `POST /api/auth/login`, `/logout`, `/register`
+- `POST /api/suppliers/register` — a supplier signing themselves up, switched off
+- `GET /api/admin/suppliers/waiting`, `PATCH /api/admin/suppliers/{id}/approval`
 
 Not endpoints, but what the endpoints are made of: the pricing engine, and
 stock reservation — the part LINQ cannot express.
 
-What is left is not porting: a Dockerfile, and the hosting decision.
+What is left is not porting: the hosting decision, and unit tests of its own —
+see the note at the end.
 
 ## Three things worth naming
 
@@ -231,11 +234,12 @@ because the update and the stock movement are in the same transaction.
 | `tools/admin-writes.mjs` | 49 admin refusals and round trips |
 | `tools/desk-writes.mjs` | 35 price-list, account and notification cases |
 | `tools/account-order.mjs` | 29 registration, sign-in and order-status cases |
+| `tools/supplier-signup.mjs` | 39 cases, and the eight places a hidden part could leak |
 | `tools/order-post.mjs` | the refusals, then one real order, then removed |
 | `tools/stock-race.mjs` | two concurrent orders for the last unit; one wins |
 | `tools/auth-interop.mjs` | a cookie from either API is accepted by the other |
 
-Four of them write. All four make their own rows, count what was there before
+Five of them write. All five make their own rows, count what was there before
 and after, and fail loudly if anything is left behind — a test script in this
 project once deleted a real catalogue part because it picked "the first product
 in the list" instead of making one. `npm run db:reconcile` in the other
@@ -255,3 +259,35 @@ the responses compared. That is the test: not that the .NET version looks
 right, but that it is indistinguishable from the one already serving
 customers. Where a response cannot match byte for byte, the difference gets
 explained before it gets accepted.
+
+## The model, re-scaffolded
+
+`Data/Entities` is reverse-engineered rather than hand-written, and staying
+that way is the point: it describes what is actually in the database rather
+than what somebody believed was. When the supplier-signup migration added
+`Supplier.active`, `Supplier.approvedAt` and `Client.supplierId`, the model was
+re-scaffolded rather than edited — the diff came back additive, three columns
+and one relation, which is itself the check that nothing had drifted.
+
+Re-scaffolding takes two manual steps afterwards, both worth knowing before
+doing it again. `dotnet ef dbcontext scaffold` wants Npgsql's
+`Host=…;Database=…` form and rejects a `postgresql://` url — and prints the
+whole connection string, password and all, in the error when it does. And it
+picks up `_prisma_migrations`, which has to be taken back out of the entities
+and the context: it is the migration ledger, the TypeScript runner still owns
+it, and modelling it would invite this project to start writing to it.
+
+## What is still not done
+
+**This project has no unit tests of its own.** `AutoPartsHub.Tests` is the
+empty template `dotnet new` writes. Everything above is verified by comparison
+against the Node API *while it is running* — which is a strong test and the
+right one for a port, and also a rope that gets cut the day the Node API is
+retired. Five vitest files in the other repository cover the pricing engine,
+auth, availability, price lists and validation; they want porting before the
+comparison harness stops being possible.
+
+Migrations, the seed scripts and the TecDoc importer also still live in the
+other repository, in TypeScript. That is a deliberate non-decision so far, not
+an oversight: they work, they are tested, and nothing here needs to own them
+yet.

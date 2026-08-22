@@ -385,6 +385,7 @@ public static class AdminSiteWriteEndpoints
                    s."defaultStockDays" AS "DefaultStockDays",
                    s."purchaseCurrencyId" AS "PurchaseCurrencyId",
                    c."code" AS "PurchaseCurrencyCode",
+                   s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
                    p."count"::int AS "ProductCount"
             FROM "Supplier" s
             LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"

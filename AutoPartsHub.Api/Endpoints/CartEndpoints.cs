@@ -86,7 +86,13 @@ public static class CartEndpoints
             }
 
             var ids = wanted.Keys.ToArray();
-            var known = await db.Products.Where(p => ids.Contains(p.Id)).Select(p => p.Id).ToListAsync(ct);
+            // "Still in the catalogue" includes whether anyone is selling it.
+            // A part behind a switched-off supplier is refused on the way into
+            // a basket, which is the earliest place to say no.
+            var known = await db.Products
+                .Where(p => ids.Contains(p.Id) && (p.SupplierId == null || p.Supplier!.Active))
+                .Select(p => p.Id)
+                .ToListAsync(ct);
             if (known.Count != ids.Length)
             {
                 // A part deleted from the catalogue since it was added. Naming
@@ -171,6 +177,14 @@ public static class CartEndpoints
               WHERE sl."productId" = p."id" AND w."active" = true
             ) st ON true
             WHERE c."clientId" = {clientId}
+            -- A part whose supplier has been switched off drops out of the
+            -- basket the same way a deleted part already does — the JOIN above
+            -- simply stops matching. One behaviour rather than two: if it
+            -- cannot be added and cannot be ordered, showing it in the basket
+            -- shows something that cannot be bought.
+            AND (p."supplierId" IS NULL OR EXISTS (
+              SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
+            ))
             ORDER BY ci."addedAt" ASC
             """).ToListAsync(ct);
 

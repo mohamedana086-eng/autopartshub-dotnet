@@ -96,6 +96,13 @@ public static class BulkLookupEndpoints
                   WHERE sl."productId" = p."id" AND w."active" = true
                 ) st ON true
                 WHERE p."id" = ANY({ids}::text[])
+                -- Same rule as search and the detail page: a switched-off
+                -- supplier's parts are not in the catalogue, so a pasted list
+                -- reports them as not carried rather than quoting a price
+                -- nobody can buy at.
+                AND (p."supplierId" IS NULL OR EXISTS (
+                  SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
+                ))
                 """).ToListAsync(ct);
 
             var byId = products.ToDictionary(p => p.Id);

@@ -35,6 +35,11 @@ public static class ProductEndpoints
                   WHERE sl."productId" = p."id" AND w."active" = true
                 ) st ON true
                 WHERE p."id" = {id}
+                -- A switched-off supplier's parts are out of the catalogue, so
+                -- this reads as "no such part" rather than showing a page
+                -- nobody can buy from. Parts with no supplier are the
+                -- catalogue's own and stay.
+                AND (p."supplierId" IS NULL OR s."active")
                 """).ToListAsync(ct)).FirstOrDefault();
 
             if (product is null) return Results.NotFound(new { error = "Product not found" });

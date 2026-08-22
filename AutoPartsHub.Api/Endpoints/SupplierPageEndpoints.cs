@@ -30,6 +30,10 @@ public static class SupplierPageEndpoints
                 FROM "Supplier" s
                 LEFT JOIN "Product" p ON p."supplierId" = s."id"
                 WHERE s."slug" = {slug}
+                  -- Not found rather than empty: a supplier waiting for
+                  -- approval should not have a public page that says who they
+                  -- are and lists nothing.
+                  AND s."active"
                 GROUP BY s."id"
                 """).ToListAsync(ct)).FirstOrDefault();
 
