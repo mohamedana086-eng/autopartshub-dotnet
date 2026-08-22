@@ -202,8 +202,8 @@ Writes, each with a test that creates what it touches and takes it away again:
 Not endpoints, but what the endpoints are made of: the pricing engine, and
 stock reservation — the part LINQ cannot express.
 
-What is left is not porting: the hosting decision, and unit tests of its own —
-see the note at the end.
+What is left is not porting: the hosting decision. The tests it needs of its
+own are done — see below.
 
 ## Three things worth naming
 
@@ -277,17 +277,47 @@ picks up `_prisma_migrations`, which has to be taken back out of the entities
 and the context: it is the migration ledger, the TypeScript runner still owns
 it, and modelling it would invite this project to start writing to it.
 
+## Tests that do not need the other API
+
+`dotnet test` — 182 cases, 143ms, no database and no network. Ported from the
+five vitest files in the other repository, which the comparison harness cannot
+replace: those run only while the Node API is alive, and the point of a port is
+that one day it will not be.
+
+| | |
+|---|---|
+| `AvailabilityTests` | uncounted and sold-out are different facts and the same answer |
+| `SessionTokenTests` | every forgery that has to fail, and the wire format the other API reads |
+| `AuthSecretTests` | the three ways a deployment ends up forgeable |
+| `RoleTests` | the role column fails closed, and SUPPLIER is not staff |
+| `PricingEngineTests` | markup, then discount, then currency, each exactly once |
+| `PriceListTests` | the conversion divides, and every refusal names the right reason |
+| `ValidatorTests` | what the admin forms may send, and the urls that only look like paths |
+
+Every test in the vitest suite has a counterpart here — checked by name, not by
+eye. The extra cases are ones C# needs and TypeScript does not: half-cent
+rounding, because .NET rounds half to even and JavaScript rounds half up; a
+missing price column, because `Number(undefined)` is NaN and a default of zero
+would price a file at nothing; and a body that is not base64 at all, which
+`Encode` cannot produce but a browser can send.
+
+**They were checked against being useless.** Two deliberate breakages, both
+caught:
+
+| break | caught by |
+|---|---|
+| rounding half to even instead of half up | 1 test |
+| currency conversion multiplying instead of dividing | 4 tests |
+
+A test suite that passes against broken code is worse than no suite, because it
+is also a reason not to look.
+
 ## What is still not done
 
-**This project has no unit tests of its own.** `AutoPartsHub.Tests` is the
-empty template `dotnet new` writes. Everything above is verified by comparison
-against the Node API *while it is running* — which is a strong test and the
-right one for a port, and also a rope that gets cut the day the Node API is
-retired. Five vitest files in the other repository cover the pricing engine,
-auth, availability, price lists and validation; they want porting before the
-comparison harness stops being possible.
+Migrations, the seed scripts and the TecDoc importer still live in the other
+repository, in TypeScript. That is a deliberate non-decision so far, not an
+oversight: they work, they are tested, and nothing here needs to own them yet.
 
-Migrations, the seed scripts and the TecDoc importer also still live in the
-other repository, in TypeScript. That is a deliberate non-decision so far, not
-an oversight: they work, they are tested, and nothing here needs to own them
-yet.
+There is no CI here. The other repository has a pipeline; this one has no
+remote to run against yet, so `dotnet test` is a thing somebody has to
+remember. That is worth fixing on the day this gets pushed somewhere.
