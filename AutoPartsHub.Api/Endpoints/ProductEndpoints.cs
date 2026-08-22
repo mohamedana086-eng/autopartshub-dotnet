@@ -1,3 +1,4 @@
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,8 @@ public static class ProductEndpoints
     {
         // GET /api/catalog/products/<id> — detail view, priced for the caller's tier.
         app.MapGet("/api/catalog/products/{id}", async (
-            string id, AutoPartsContext db, PricingContextLoader pricing, HttpContext http, CancellationToken ct) =>
+            string id, AutoPartsContext db, SpecQueries specQueries, PricingContextLoader pricing,
+            HttpContext http, CancellationToken ct) =>
         {
             var product = (await db.Database.SqlQuery<ProductDetailRow>($"""
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
@@ -68,6 +70,10 @@ public static class ProductEndpoints
                 .AsNoTracking()
                 .ToListAsync(ct);
 
+            // All of them, not the three a result row shows. This is the page
+            // the row was pointing at when it said there was more.
+            var specs = (await specQueries.ForAsync([id], null, ct)).GetValueOrDefault(id) ?? [];
+
             return Results.Ok(new
             {
                 tierName = ctx.TierName,
@@ -81,6 +87,13 @@ public static class ProductEndpoints
                     manufacturer = product.ManufacturerName,
                     system = product.SystemName,
                     systemSlug = product.SystemSlug,
+                    // What the customer would be buying. On the search row
+                    // since the part-type filter was added, and missing here
+                    // until now — so the storefront's own type declared it
+                    // required on the detail response and read `undefined` at
+                    // runtime. The badge answers "what am I buying", which is
+                    // a question asked on the page you open to decide.
+                    partType = product.PartType,
                     stockDays = product.StockDays,
                     price = priced?.FinalPrice ?? RequestPricing.PurchasePrice(product),
                     appliedRule = priced?.AppliedRule,
@@ -88,6 +101,11 @@ public static class ProductEndpoints
                     // part. The alt falls back to the part's name where it is
                     // rendered, per the schema.
                     images,
+                    // Every specification the part has, in its own display
+                    // order. The search result row carries the first three;
+                    // this is where the rest of them are, which is the whole
+                    // reason the row can afford to show only three.
+                    specs,
                     available = product.Available,
                     supplier = product.SupplierSlug is null ? null : new
                     {

@@ -54,7 +54,8 @@ public static class SearchEndpoints
     public static void MapSearchEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/catalog/search", async (
-            HttpContext http, SearchQueries queries, PricingContextLoader pricing, CancellationToken ct) =>
+            HttpContext http, SearchQueries queries, SpecQueries specQueries,
+            PricingContextLoader pricing, CancellationToken ct) =>
         {
             var query = http.Request.Query;
             string? Param(string key) =>
@@ -137,12 +138,22 @@ public static class SearchEndpoints
                 ? await queries.IdsMatchingNormalisedPartNumberAsync(q, ct)
                 : [];
 
-            // Vehicle and supplier narrow the catalogue itself, so they run in
-            // the query. System and brand are applied further down, after
-            // their facet counts have been taken — a count already narrowed by
-            // its own filter tells the customer nothing about what else they
-            // could pick.
-            var matches = await queries.SearchAsync(tokens, normalisedIds, variant, supplier, MaxMatches, ct);
+            // Everything a column can decide now happens in the query,
+            // including the facet counts. The endpoint used to filter the rows
+            // the query had already returned, which answers a different
+            // question the moment there are more parts than the window: one
+            // system out of a million is a thousand arbitrary rows narrowed
+            // afterwards, not the first thousand of that system.
+            var rowFilters = new RowFilters(system, manufacturer, minRating, reliability, returnsOnly, partType);
+            var found = await queries.SearchAsync(tokens, normalisedIds, variant, supplier, rowFilters, MaxMatches, ct);
+            // Its own round trip because it counts over different populations
+            // from the one the rows come from — the systems over everything
+            // matched, the rest over the chosen system, and neither narrowed
+            // by the facet's own filter.
+            var facetRows = await queries.FacetsAsync(tokens, normalisedIds, variant, supplier, system, ct);
+            var matches = found.Rows;
+            // What the filters match in the database, whatever the window returned.
+            var matchedTotal = found.Total;
             var systemName = system is null ? null : await queries.SystemNameBySlugAsync(system, ct);
             var variantName = variant is null ? null : await queries.VariantLabelAsync(variant, ct);
             var supplierName = supplier is null ? null : await queries.SupplierNameBySlugAsync(supplier, ct);
@@ -168,7 +179,28 @@ public static class SearchEndpoints
                     // saying it found something it did not.
                     if (close.Count > 0)
                     {
-                        matches = close;
+                        // The facets have to describe these rows rather than
+                        // the exact match that found nothing, which is what
+                        // the database just counted. Recomputed here rather
+                        // than by a second facet query because there are at
+                        // most twenty-five of them: a round trip to group a
+                        // list this small costs more than the loop.
+                        //
+                        // Taken before the row filters narrow anything,
+                        // exactly as the query takes them.
+                        facetRows = FacetsFromRows(close, system);
+                        // The row filters have to be applied here too. These
+                        // rows arrived by id, through a query that knows
+                        // nothing about the filters, so without this a
+                        // misspelling answers as though the customer had
+                        // selected nothing.
+                        matches = ApplyRowFilters(close, rowFilters);
+                        // The fallback is capped at twenty-five ids by the
+                        // scoring itself, so what came back IS all of it — the
+                        // total is what survived the filters, not whatever the
+                        // exact-match query counted (which was zero). Anything
+                        // else would report a complete answer as truncated.
+                        matchedTotal = matches.Count;
                         fuzzy = true;
                     }
                 }
@@ -182,56 +214,19 @@ public static class SearchEndpoints
                 .ToDictionary(g => g.Key, g => g.ToList());
             List<InterchangeRow> InterchangesOf(SearchRow p) => crossRefs.GetValueOrDefault(p.Id) ?? [];
 
-            var systemCounts = new Dictionary<string, (string Slug, string Name, int Count)>();
-            foreach (var p in matches)
-            {
-                systemCounts[p.SystemSlug] = systemCounts.TryGetValue(p.SystemSlug, out var e)
-                    ? (e.Slug, e.Name, e.Count + 1)
-                    : (p.SystemSlug, p.SystemName, 1);
-            }
+            // The facet tallies, as the database counted them. Grouped by kind
+            // here rather than shaped in SQL: one flat result set is one round
+            // trip, and turning it into six lists is a loop rather than six
+            // queries.
+            List<FacetCount> FacetsOf(string kind) => facetRows.Where(f => f.Kind == kind).ToList();
+            Dictionary<string, int> Tally(string kind) =>
+                FacetsOf(kind).ToDictionary(f => f.Key, f => f.Count);
 
-            var inSystem = system is null ? matches : matches.Where(p => p.SystemSlug == system).ToList();
-
-            var brandCounts = new Dictionary<string, int>();
-            foreach (var p in inSystem)
-            {
-                brandCounts[p.ManufacturerName] = brandCounts.GetValueOrDefault(p.ManufacturerName) + 1;
-            }
-
-            // Counted per exact rating rather than per threshold, so the UI can
-            // build whichever thresholds it offers by summing downwards. Key 0
-            // stands for unrated, kept visible so the gap is obvious rather
-            // than silently dropped. Like the brand facet, this describes the
-            // current system and is not narrowed by the rating filter itself.
-            var ratingCounts = new Dictionary<int, int>();
-            foreach (var p in inSystem)
-            {
-                var key = p.SupplierRating ?? 0;
-                ratingCounts[key] = ratingCounts.GetValueOrDefault(key) + 1;
-            }
-
-            // Counted on inSystem alongside the brand and rating facets, and so
-            // before the part-type filter narrows anything: a count already
-            // narrowed by its own filter says "3 genuine" when genuine is the
-            // only thing selected, which tells the customer nothing about what
-            // unticking it would show.
-            //
-            // Every part has exactly one type, so unlike the matchIn counts
-            // these sum to the result count rather than overlapping.
-            var partTypeCounts = new Dictionary<string, int>();
-            foreach (var p in inSystem)
-            {
-                partTypeCounts[p.PartType] = partTypeCounts.GetValueOrDefault(p.PartType) + 1;
-            }
-
-            var reliabilityCounts = new Dictionary<string, int>();
-            var returnsCount = 0;
-            foreach (var p in inSystem)
-            {
-                if (p.SupplierReliability is null) continue;
-                reliabilityCounts[p.SupplierReliability] = reliabilityCounts.GetValueOrDefault(p.SupplierReliability) + 1;
-                if (p.SupplierAcceptsReturns == true) returnsCount++;
-            }
+            var brandCounts = Tally("brand");
+            var reliabilityCounts = Tally("reliability");
+            var partTypeCounts = Tally("partType");
+            var ratingCounts = FacetsOf("rating").ToDictionary(f => int.Parse(f.Key), f => f.Count);
+            var returnsCount = FacetsOf("returns").FirstOrDefault()?.Count ?? 0;
 
             var needle = PartNumbers.Normalise(q);
             var lower = q.ToLowerInvariant();
@@ -256,16 +251,10 @@ public static class SearchEndpoints
                 ["aftermarket"] = q.Length > 0 && InterchangesOf(p).Any(i => !i.IsOem && NumberHit(i.TargetPartNo)),
             };
 
-            var scored = inSystem
-                .Where(p => manufacturer is null
-                            || p.ManufacturerName.Equals(manufacturer, StringComparison.OrdinalIgnoreCase))
-                .Where(p => minRating is null || (p.SupplierRating ?? 0) >= minRating)
-                .Where(p => reliability is null || p.SupplierReliability == reliability)
-                .Where(p => !returnsOnly || p.SupplierAcceptsReturns == true)
-                // Any of the selected kinds is enough. They are alternatives a
-                // customer is willing to accept — "genuine or aftermarket, but
-                // not a substitute" — and no part could satisfy two at once.
-                .Where(p => partType.Length == 0 || partType.Contains(p.PartType))
+            // Already filtered by the query: the system, brand, rating,
+            // reliability, returns and part-type predicates all ran in SQL.
+            // What is left to do per row is rank it and price it.
+            var scored = matches
                 .Select((p, index) =>
                 {
                     var normalisedPart = PartNumbers.Normalise(p.PartNumber);
@@ -384,6 +373,26 @@ public static class SearchEndpoints
                 };
             });
 
+            // The page, taken once. Everything below either reports on it or
+            // describes the whole result set; nothing recomputes it.
+            var pageRows = Paging.PageOf(withinPrice, page, pageSize).ToList();
+            var pageIds = pageRows.Select(s => s.Product.Id).ToList();
+
+            // Specifications for the rows actually being returned, and not one
+            // more.
+            //
+            // Unlike the cross-references above, these are fetched after paging
+            // rather than for every match: interchanges decide the ranking, so
+            // all of them are needed before the order is known, while
+            // specifications are only ever displayed. Fetching them for a
+            // thousand matches to show fifty would be twenty times the rows for
+            // the same page.
+            //
+            // The count comes back separately so a row can say how many it is
+            // not showing without fetching them to find out.
+            var rowSpecs = await specQueries.ForAsync(pageIds, SpecQueries.RowSpecs, ct);
+            var howManySpecs = await specQueries.CountsAsync(pageIds, ct);
+
             return Results.Ok(new
             {
                 query = q,
@@ -415,18 +424,26 @@ public static class SearchEndpoints
                 // Zero when nothing matched, so "page 1 of 0" reads as the
                 // empty result it is.
                 pageCount = Paging.PageCount(withinPrice.Count, pageSize),
-                // True when the search filled its window, which makes `count` a
-                // floor and the last page not necessarily the last of anything.
+                // True when the database held more rows than the window
+                // returned, which makes `count` a floor and the last page not
+                // necessarily the last of anything.
+                //
+                // Exact rather than inferred: the query reports how many rows
+                // the filters matched whatever the limit was, so this compares
+                // the two instead of guessing from a full window. A search
+                // matching exactly MaxMatches rows used to report itself
+                // truncated when it was complete.
+                //
                 // Reported rather than hidden: a total that is quietly a lower
                 // bound is worse than no total, because it reads as a fact and
                 // every page number computed from it inherits the error.
-                truncated = matches.Count >= MaxMatches,
+                truncated = matchedTotal > matches.Count,
                 priceRange,
                 facets = new
                 {
-                    systems = systemCounts.Values
-                        .OrderByDescending(s => s.Count).ThenBy(s => s.Name, StringComparer.InvariantCulture)
-                        .Select(s => new { slug = s.Slug, name = s.Name, count = s.Count }),
+                    systems = FacetsOf("system")
+                        .Select(f => new { slug = f.Key, name = f.Label ?? f.Key, count = f.Count })
+                        .OrderByDescending(s => s.count).ThenBy(s => s.name, StringComparer.InvariantCulture),
                     manufacturers = brandCounts
                         .OrderByDescending(b => b.Value).ThenBy(b => b.Key, StringComparer.InvariantCulture)
                         .Select(b => new { name = b.Key, count = b.Value }),
@@ -465,10 +482,94 @@ public static class SearchEndpoints
                 // there, and answering with a different page while echoing the
                 // number they asked for would be the response disagreeing with
                 // itself.
-                products = Paging.PageOf(withinPrice, page, pageSize).Select(s => s.Product),
+                products = pageRows.Select(s => new SearchProductWithSpecsDto(
+                    s.Product,
+                    // The first three specifications, in the order the part
+                    // lists them. Three because that is what fits beside the
+                    // price and the delivery time, and because three is enough
+                    // to tell two parts of the same name apart — two "Brake pad
+                    // set, front" differ by width, height and thickness. The
+                    // rest are on the part's own page.
+                    rowSpecs.GetValueOrDefault(s.Product.Id) ?? [],
+                    // How many the part has in total, so a row can say what it
+                    // is holding back.
+                    howManySpecs.GetValueOrDefault(s.Product.Id))),
             });
         });
     }
+
+    /// <summary>
+    /// The same six tallies the facet query produces, over rows already in hand.
+    /// </summary>
+    /// <remarks>
+    /// Only the fuzzy fallback needs this. That path replaces the results
+    /// after the database has already counted the exact match — which found
+    /// nothing, since that is why the fallback ran — so the counts have to be
+    /// redone over what it actually returned. It is capped at twenty-five rows
+    /// by the scoring, so a loop is cheaper than a second round trip.
+    ///
+    /// The populations match the query's: systems over everything, the rest
+    /// over what is in the chosen system.
+    /// </remarks>
+    private static List<FacetCount> FacetsFromRows(List<SearchRow> rows, string? system)
+    {
+        var outp = new List<FacetCount>();
+        var inSystem = system is null ? rows : rows.Where(p => p.SystemSlug == system).ToList();
+
+        var systems = new Dictionary<string, (string Name, int Count)>();
+        foreach (var p in rows)
+        {
+            systems[p.SystemSlug] = systems.TryGetValue(p.SystemSlug, out var e)
+                ? (e.Name, e.Count + 1)
+                : (p.SystemName, 1);
+        }
+        foreach (var (slug, s) in systems) outp.Add(new FacetCount("system", slug, s.Name, s.Count));
+
+        void Tally(string kind, IEnumerable<string> keys)
+        {
+            var counts = new Dictionary<string, int>();
+            foreach (var k in keys) counts[k] = counts.GetValueOrDefault(k) + 1;
+            foreach (var (k, n) in counts) outp.Add(new FacetCount(kind, k, null, n));
+        }
+
+        Tally("brand", inSystem.Select(p => p.ManufacturerName));
+        Tally("rating", inSystem.Select(p => (p.SupplierRating ?? 0).ToString()));
+
+        var withSupplier = inSystem.Where(p => p.SupplierReliability is not null).ToList();
+        Tally("reliability", withSupplier.Select(p => p.SupplierReliability!));
+        var returns = withSupplier.Count(p => p.SupplierAcceptsReturns == true);
+        if (returns > 0) outp.Add(new FacetCount("returns", "yes", null, returns));
+
+        Tally("partType", inSystem.Select(p => p.PartType));
+
+        return outp;
+    }
+
+    /// <summary>
+    /// The row filters, applied in memory.
+    /// </summary>
+    /// <remarks>
+    /// The same predicates the search query runs in SQL, over rows already in
+    /// hand. Only the fuzzy fallback needs this: that path reaches its rows by
+    /// id, through a query that deliberately knows nothing about the filters —
+    /// it is asked "which parts are these", not "which parts match". Leaving
+    /// them unfiltered made a misspelling ignore the system, brand, rating,
+    /// reliability, returns and type the customer had picked.
+    ///
+    /// Applied after <see cref="FacetsFromRows"/>, because the facets describe
+    /// what the near-misses offer BEFORE these narrow them — the same ordering
+    /// the query uses, for the same reason.
+    /// </remarks>
+    private static List<SearchRow> ApplyRowFilters(List<SearchRow> rows, RowFilters r) =>
+        rows.Where(p =>
+                (r.System is null || p.SystemSlug == r.System)
+                && (r.Manufacturer is null
+                    || p.ManufacturerName.Equals(r.Manufacturer, StringComparison.OrdinalIgnoreCase))
+                && (r.MinRating is null || (p.SupplierRating ?? 0) >= r.MinRating)
+                && (r.Reliability is null || p.SupplierReliability == r.Reliability)
+                && (!r.ReturnsOnly || p.SupplierAcceptsReturns == true)
+                && (r.PartType is not { Length: > 0 } || r.PartType.Contains(p.PartType)))
+            .ToList();
 
     private record Scored(int Rank, Dictionary<string, bool> Hits, SearchProductDto Product);
 }
@@ -477,6 +578,45 @@ public record ImageDto(string Url, string? Alt);
 
 public record SearchSupplierDto(
     string Slug, string Name, int? Rating, string Reliability, bool? AcceptsReturns);
+
+/// <summary>
+/// A search result with its specifications on it.
+/// </summary>
+/// <remarks>
+/// Composed rather than added to <see cref="SearchProductDto"/> because the
+/// specifications are not part of the row the ranking and pricing work over —
+/// they are fetched after paging, for the page alone, and only to be shown.
+/// <c>[JsonExtensionData]</c>-style flattening is not available on a record, so
+/// the properties are restated; the compiler holds the two in step because the
+/// constructor takes the DTO whole.
+/// </remarks>
+public record SearchProductWithSpecsDto(
+    string Id,
+    string PartNumber,
+    string Name,
+    string Manufacturer,
+    string System,
+    string SystemSlug,
+    string PartType,
+    int StockDays,
+    double Price,
+    string? AppliedRule,
+    ImageDto? Image,
+    int? Available,
+    SearchSupplierDto? Supplier,
+    string MatchedOn,
+    string? MatchedVia,
+    string? MatchedViaManufacturer,
+    IReadOnlyList<Spec> Specs,
+    int SpecCount)
+{
+    public SearchProductWithSpecsDto(SearchProductDto p, IReadOnlyList<Spec> specs, int specCount)
+        : this(p.Id, p.PartNumber, p.Name, p.Manufacturer, p.System, p.SystemSlug, p.PartType,
+               p.StockDays, p.Price, p.AppliedRule, p.Image, p.Available, p.Supplier,
+               p.MatchedOn, p.MatchedVia, p.MatchedViaManufacturer, specs, specCount)
+    {
+    }
+}
 
 public record SearchProductDto(
     string Id,

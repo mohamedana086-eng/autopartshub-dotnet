@@ -47,12 +47,13 @@ public sealed class SearchQueries(AutoPartsContext db)
     /// </remarks>
     private static readonly string[] NeverMatches = ["no-token-can-contain-this-sentinel"];
 
-    /// <summary>Parts matching the query and the filters that narrow the catalogue itself.</summary>
-    public async Task<List<SearchRow>> SearchAsync(
+    /// <summary>Parts matching the query and every filter a column can decide.</summary>
+    public async Task<SearchPage> SearchAsync(
         IReadOnlyList<string> queryTokens,
         IReadOnlyList<string> normalisedIds,
         string? variant,
         string? supplier,
+        RowFilters rows,
         int limit,
         CancellationToken ct = default)
     {
@@ -60,8 +61,20 @@ public sealed class SearchQueries(AutoPartsContext db)
         var tokens = queryTokens.Count > 0 ? queryTokens.ToArray() : NeverMatches;
         var ids = normalisedIds.ToArray();
 
-        return await db.Database.SqlQuery<SearchRow>($"""
-            SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
+        var system = rows.System;
+        var manufacturer = rows.Manufacturer;
+        var minRating = rows.MinRating;
+        var reliability = rows.Reliability;
+        var returnsOnly = rows.ReturnsOnly;
+        // An empty selection means every kind, which the null-cancelling shape
+        // below expresses as null rather than as a list of all three — the two
+        // are the same answer, and only one of them stays right when a fourth
+        // kind is added.
+        var partType = rows.PartType is { Length: > 0 } chosen ? chosen : null;
+
+        var counted = await db.Database.SqlQuery<CountedSearchRow>($"""
+            SELECT COUNT(*) OVER () ::int AS "Total",
+                   p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                    p."description" AS "Description", p."stockDays" AS "StockDays",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                    p."partType" AS "PartType",
@@ -126,7 +139,119 @@ public sealed class SearchQueries(AutoPartsContext db)
             -- until an admin approves them. Parts with no supplier at all are
             -- the catalogue's own and stay.
             AND (p."supplierId" IS NULL OR s."active")
+            -- The row filters. Each cancels itself when its parameter is null,
+            -- so every combination is the same statement with the same holes.
+            AND ({system}::text IS NULL OR v."slug" = {system})
+            AND ({manufacturer}::text IS NULL OR lower(m."name") = lower({manufacturer}))
+            -- COALESCE rather than a bare comparison: an unrated supplier is
+            -- NULL, and NULL >= 4 is null, which drops the row for a reason
+            -- nobody reading it could name. Written this way the rule is
+            -- legible — unrated counts as zero, so no minimum includes it.
+            AND ({minRating}::int IS NULL OR COALESCE(s."rating", 0) >= {minRating})
+            AND ({reliability}::text IS NULL OR s."reliability" = {reliability})
+            -- Only an explicit yes. A supplier whose return terms are
+            -- unrecorded is not evidence that they accept them, and IS TRUE
+            -- says so where a plain equality would leave a null to argue over.
+            AND ({returnsOnly}::bool IS NOT TRUE OR s."acceptsReturns" IS TRUE)
+            AND ({partType}::text[] IS NULL OR p."partType" = ANY({partType}::text[]))
             LIMIT {limit}
+            """).ToListAsync(ct);
+
+        return new SearchPage(
+            counted.Select(c => c.ToRow()).ToList(),
+            // No rows means no total to read one off. The window function has
+            // nothing to attach to, which is not the same as it saying zero.
+            counted.Count > 0 ? counted[0].Total : 0);
+    }
+
+    /// <summary>
+    /// Every facet, in one round trip.
+    /// </summary>
+    /// <remarks>
+    /// Six tallies over two populations: the systems describe everything the
+    /// query matched, and the rest describe what is in the chosen system. So
+    /// the query is two CTEs and a UNION rather than six statements — each of
+    /// which would have re-run the match, and the match is the expensive half.
+    ///
+    /// Deliberately NOT narrowed by the brand, rating, reliability, returns or
+    /// type filters. Each of those facets has to say what picking it would
+    /// leave, and a count already narrowed by its own filter cannot: it would
+    /// report "BOSCH 9" when BOSCH is selected and 9 whatever else is true.
+    /// </remarks>
+    public async Task<List<FacetCount>> FacetsAsync(
+        IReadOnlyList<string> queryTokens,
+        IReadOnlyList<string> normalisedIds,
+        string? variant,
+        string? supplier,
+        string? system,
+        CancellationToken ct = default)
+    {
+        var hasQuery = queryTokens.Count > 0 || normalisedIds.Count > 0;
+        var tokens = queryTokens.Count > 0 ? queryTokens.ToArray() : NeverMatches;
+        var ids = normalisedIds.ToArray();
+
+        return await db.Database.SqlQuery<FacetCount>($"""
+            WITH matched AS (
+              SELECT p."id", p."partType",
+                     m."name" AS "manufacturerName",
+                     v."slug" AS "systemSlug", v."name" AS "systemName",
+                     s."rating" AS "supplierRating",
+                     s."reliability" AS "supplierReliability",
+                     s."acceptsReturns" AS "supplierAcceptsReturns"
+              FROM "Product" p
+              JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
+              JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
+              LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+              WHERE (
+                {hasQuery}::bool IS NOT TRUE
+                OR p."id" = ANY({ids}::text[])
+                OR NOT EXISTS (
+                  SELECT 1 FROM unnest({tokens}::text[]) AS tok
+                  WHERE NOT (
+                    p."partNumber" ILIKE '%' || tok || '%'
+                    OR p."name" ILIKE '%' || tok || '%'
+                    OR COALESCE(p."description", '') ILIKE '%' || tok || '%'
+                    OR m."name" ILIKE '%' || tok || '%'
+                    OR EXISTS (
+                      SELECT 1 FROM "Interchange" i
+                      WHERE i."sourceId" = p."id" AND i."targetPartNo" ILIKE '%' || tok || '%'
+                    )
+                  )
+                )
+              )
+              AND ({variant}::text IS NULL OR EXISTS (
+                SELECT 1 FROM "Fitment" fit
+                WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
+              ))
+              AND ({supplier}::text IS NULL OR s."slug" = {supplier})
+              AND (p."supplierId" IS NULL OR s."active")
+            ),
+            in_system AS (
+              SELECT * FROM matched WHERE ({system}::text IS NULL OR "systemSlug" = {system})
+            )
+            SELECT 'system' AS "Kind", "systemSlug" AS "Key", "systemName" AS "Label",
+                   COUNT(*)::int AS "Count"
+            FROM matched GROUP BY "systemSlug", "systemName"
+            UNION ALL
+            SELECT 'brand', "manufacturerName", NULL, COUNT(*)::int FROM in_system
+            GROUP BY "manufacturerName"
+            UNION ALL
+            -- Per exact rating rather than per threshold, so a caller can build
+            -- whichever thresholds it offers by summing downwards. Key 0 is
+            -- unrated, kept visible so the gap is obvious rather than dropped.
+            SELECT 'rating', COALESCE("supplierRating", 0)::text, NULL, COUNT(*)::int FROM in_system
+            GROUP BY COALESCE("supplierRating", 0)
+            UNION ALL
+            SELECT 'reliability', "supplierReliability", NULL, COUNT(*)::int FROM in_system
+            WHERE "supplierReliability" IS NOT NULL GROUP BY "supplierReliability"
+            UNION ALL
+            -- Counted only among parts that have a supplier at all, matching
+            -- the reliability tally beside it: a part with nobody behind it is
+            -- not evidence either way about returns.
+            SELECT 'returns', 'yes', NULL, COUNT(*)::int FROM in_system
+            WHERE "supplierReliability" IS NOT NULL AND "supplierAcceptsReturns" IS TRUE
+            UNION ALL
+            SELECT 'partType', "partType", NULL, COUNT(*)::int FROM in_system GROUP BY "partType"
             """).ToListAsync(ct);
     }
 
@@ -309,6 +434,82 @@ public record SearchRow(
     bool? SupplierAcceptsReturns) : IPriceable;
 
 public record InterchangeRow(string SourceId, string TargetPartNo, string TargetManufacturer, bool IsOem);
+
+/// <summary>
+/// The filters that narrow which parts are considered at all.
+/// </summary>
+/// <remarks>
+/// Split out rather than added to the search's own parameters because the
+/// facet query needs the two halves separately: the system counts describe
+/// everything the query matched, and the rest describe what is in the chosen
+/// system. One flat parameter list would have to be taken apart at every call
+/// site to say which half was meant.
+/// </remarks>
+/// <param name="MinRating">
+/// Lowest supplier rating that counts. A part whose supplier is unrated, or
+/// which has no supplier, falls outside every minimum on purpose: "at least
+/// four stars" is a claim about known performance, and theirs is not known.
+/// </param>
+/// <param name="ReturnsOnly">
+/// Only suppliers known to take stock back — an explicit yes, never a null.
+/// </param>
+/// <param name="PartType">Empty means every kind.</param>
+public record RowFilters(
+    string? System = null,
+    string? Manufacturer = null,
+    int? MinRating = null,
+    string? Reliability = null,
+    bool ReturnsOnly = false,
+    string[]? PartType = null);
+
+/// <summary>Rows plus how many there would have been without the limit.</summary>
+/// <param name="Total">
+/// The exact number of parts the filters match, whatever the limit was.
+/// <c>COUNT(*) OVER ()</c> on the same pass rather than a second query: a
+/// separate count runs the whole match again, and between the two the answer
+/// can change.
+/// </param>
+public record SearchPage(List<SearchRow> Rows, int Total);
+
+/// <summary>A search row carrying the total of the set it came from.</summary>
+/// <remarks>
+/// Its own type rather than a nullable field on <see cref="SearchRow"/>:
+/// EF requires every property of the queried type to be present in the result
+/// set, so a <c>Total</c> on SearchRow would break <c>ByIdsAsync</c>, which
+/// does not count. The columns are therefore written out once more here, for
+/// the same reason the SELECT is — see the note on the class.
+/// </remarks>
+public record CountedSearchRow(
+    int Total,
+    string Id,
+    string PartNumber,
+    string Name,
+    string? Description,
+    int StockDays,
+    double BasePrice,
+    string? SupplierId,
+    string PartType,
+    string ManufacturerName,
+    string SystemName,
+    string SystemSlug,
+    double? ListPrice,
+    string? ImageUrl,
+    string? ImageAlt,
+    int? Available,
+    string? SupplierSlug,
+    string? SupplierName,
+    int? SupplierRating,
+    string? SupplierReliability,
+    bool? SupplierAcceptsReturns)
+{
+    public SearchRow ToRow() => new(
+        Id, PartNumber, Name, Description, StockDays, BasePrice, SupplierId, PartType,
+        ManufacturerName, SystemName, SystemSlug, ListPrice, ImageUrl, ImageAlt, Available,
+        SupplierSlug, SupplierName, SupplierRating, SupplierReliability, SupplierAcceptsReturns);
+}
+
+/// <summary>One facet tally. <c>Label</c> carries the system's name; nothing else needs one.</summary>
+public record FacetCount(string Kind, string Key, string? Label, int Count);
 
 /// <summary>
 /// Comparing part numbers.
