@@ -149,7 +149,26 @@ for (const qs of [
   // an OE number, and every one of them aftermarket.
   "q=34 11 6 794 917&matchIn=oem",
   "q=34 11 6 794 917&partType=oem",
-  "q=34 11 6 794 917&partType=aftermarket"
+  "q=34 11 6 794 917&partType=aftermarket",
+  // Paging, including every way a page number or size can arrive wrong. All
+  // of them are clamped rather than refused, so what matters is that the two
+  // clamp identically — a page the APIs disagree about is a customer seeing
+  // different results depending on which one answered.
+  "page=2",
+  "page=2&pageSize=10",
+  "page=99",                           // past the end: empty, not clamped
+  "pageSize=100000",                   // clamped to the server maximum
+  "pageSize=0",
+  "page=0",
+  "page=-3",
+  "page=2.7",                          // floored
+  "pageSize=7.9",
+  "page=abc",
+  "pageSize=abc",
+  "limit=3&pageSize=25",               // pageSize wins over the legacy name
+  "q=brake&page=2&pageSize=5",
+  "q=brake&page=2&pageSize=5&sort=price-asc",
+  "system=brake-system&page=2&pageSize=3"
 ]) {
   for (const who of ['anonymous', 'retail', 'admin']) {
     GROUPS.search.push([who, '/api/catalog/search' + (qs ? '?' + qs : '?q=')]);

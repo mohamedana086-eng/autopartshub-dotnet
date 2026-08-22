@@ -31,7 +31,23 @@ public static class SearchEndpoints
     /// </remarks>
     private static readonly string[] PartTypes = ["oem", "aftermarket", "substitute"];
 
-    private const int MaxResults = 200;
+    /// <summary>
+    /// How deep a search reaches, and therefore how far paging can go.
+    /// </summary>
+    /// <remarks>
+    /// Everything after the query — the system, brand, rating, reliability,
+    /// returns and part-type filters, the ranking, and the price bounds that
+    /// depend on the caller's own tier — happens over the rows this fetches.
+    /// So this is not a page size, it is the depth to which the answer is
+    /// exact: <c>count</c> is the true total when fewer than this many rows
+    /// matched, and a floor when exactly this many did. <c>truncated</c> in
+    /// the response says which.
+    ///
+    /// A catalogue of millions needs the filters and the facet counts pushed
+    /// into SQL so that paging is the database's job; this number is what
+    /// makes the current shape honest rather than what makes it scale.
+    /// </remarks>
+    private const int MaxMatches = 1000;
 
     // GET /api/catalog/search?q=&system=&manufacturer=&sort=&limit=
     // Prices come from the caller's own session tier — see PricingContextLoader.
@@ -87,7 +103,22 @@ public static class SearchEndpoints
 
             var sort = Sorts.Contains(query["sort"].ToString()) ? query["sort"].ToString() : "relevance";
 
-            var limit = int.TryParse(query["limit"], out var l) && l > 0 ? Math.Min(l, MaxResults) : MaxResults;
+            // How many rows to return, and which page of them.
+            //
+            // `limit` is the name this had before there were pages and still
+            // works: it says how many rows, which is what a page size is. The
+            // search-as-you-type suggestions ask for six and keep working.
+            //
+            // Both are clamped rather than refused. A page size of 100000 is a
+            // mistake or an attempt, and neither is worth an error message the
+            // customer would see; a page below one is a rounding error
+            // somewhere. The response echoes what was actually used.
+            //
+            // The arithmetic is in Paging, where it can be tested without an
+            // HTTP round trip — including the fractional and out-of-range
+            // cases, which are the ones that differ between languages.
+            var pageSize = Paging.ReadPageSize(query["pageSize"], query["limit"]);
+            var page = Paging.ReadPage(query["page"]);
 
             double? PriceBound(string key) =>
                 double.TryParse(query[key], System.Globalization.NumberStyles.Float,
@@ -111,7 +142,7 @@ public static class SearchEndpoints
             // their facet counts have been taken — a count already narrowed by
             // its own filter tells the customer nothing about what else they
             // could pick.
-            var matches = await queries.SearchAsync(tokens, normalisedIds, variant, supplier, MaxResults, ct);
+            var matches = await queries.SearchAsync(tokens, normalisedIds, variant, supplier, MaxMatches, ct);
             var systemName = system is null ? null : await queries.SystemNameBySlugAsync(system, ct);
             var variantName = variant is null ? null : await queries.VariantLabelAsync(variant, ct);
             var supplierName = supplier is null ? null : await queries.SupplierNameBySlugAsync(supplier, ct);
@@ -375,7 +406,21 @@ public static class SearchEndpoints
                 fuzzy,
                 tierName = ctx.TierName,
                 isLoggedIn = ctx.IsLoggedIn,
+                // How many results there are, after every filter. Exact unless
+                // `truncated`, in which case it is a floor: the query stopped
+                // at MaxMatches rows and there may be more behind them.
                 count = withinPrice.Count,
+                page,
+                pageSize,
+                // Zero when nothing matched, so "page 1 of 0" reads as the
+                // empty result it is.
+                pageCount = Paging.PageCount(withinPrice.Count, pageSize),
+                // True when the search filled its window, which makes `count` a
+                // floor and the last page not necessarily the last of anything.
+                // Reported rather than hidden: a total that is quietly a lower
+                // bound is worse than no total, because it reads as a fact and
+                // every page number computed from it inherits the error.
+                truncated = matches.Count >= MaxMatches,
                 priceRange,
                 facets = new
                 {
@@ -415,7 +460,12 @@ public static class SearchEndpoints
                     partTypes = PartTypes.Select(
                         name => new { name, count = partTypeCounts.GetValueOrDefault(name) }),
                 },
-                products = withinPrice.Take(limit).Select(s => s.Product),
+                // A page past the end is an empty list rather than a clamp to
+                // the last one: the caller asked for something that is not
+                // there, and answering with a different page while echoing the
+                // number they asked for would be the response disagreeing with
+                // itself.
+                products = Paging.PageOf(withinPrice, page, pageSize).Select(s => s.Product),
             });
         });
     }
