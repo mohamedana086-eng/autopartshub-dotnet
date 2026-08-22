@@ -88,22 +88,61 @@ differences. The generator is seeded, so a failure can be re-run.
 
 ## Progress
 
-Ported and verified against the live Node API:
+**59 of 63 endpoints**, each verified against the live Node API.
 
-- `GET /api/systems`
-- `GET /api/suppliers`
-- `GET /api/vehicles`
-- `GET /api/vehicles/vin`
-- `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/session`
-- the pricing engine — not an endpoint, but what every priced response calls
-- stock reservation — likewise, and the part LINQ cannot express
-- `GET /api/catalog/search` — 105 filter combinations compared
-- `GET`/`PUT /api/cart`
-- `GET`/`POST /api/notifications`, `PATCH /api/notifications/{id}`
+Reads — every one of them, compared request for request:
 
-Remaining: 52 of 63. Every read is done. What is left creates, edits and deletes,
-which needs the same discipline the order test used: make the data, use it,
-remove it, and check nothing real was touched.
+- the catalogue: `/api/systems`, `/api/suppliers`, `/api/vehicles`,
+  `/api/vehicles/vin`, `/api/catalog/products/{id}`, `/api/catalog/search`
+- the account: `/api/auth/session`, `/api/cart`, `/api/notifications`,
+  `/api/orders`
+- the admin desk: stats, orders, carts, notifications, clients, products,
+  images, stock, suppliers, warehouses, outlets, currencies, tiers, markup
+  rules, price lists
+
+Writes, each with its own test that creates what it touches and removes it:
+
+- `POST`/`PATCH`/`DELETE` on suppliers, warehouses, outlets, currencies,
+  client tiers, markup rules, products
+- `PUT` on a product's images and its stock
+- `POST`/`PATCH`/`DELETE /api/admin/price-lists` — including the conversion
+  into the base currency, the duplicate-row rule, and the partial unique index
+  that allows only one active list
+- `PATCH /api/admin/clients/{id}`
+- `POST /api/admin/notifications`
+- `PUT /api/cart`, `POST /api/orders`, `POST`/`PATCH /api/notifications`
+- `POST /api/auth/login`, `POST /api/auth/logout`
+
+Not endpoints, but what the endpoints are made of: the pricing engine, and
+stock reservation — the part LINQ cannot express.
+
+Still to port:
+
+| | |
+|---|---|
+| `POST /api/auth/register` | opening an account — the one write that hashes a password |
+| `POST /api/catalog/bulk` | a pasted list of part numbers, priced |
+| `GET /api/suppliers/{slug}` | one supplier's public page |
+| `PATCH /api/admin/orders/{id}` | moving an order along its statuses |
+
+Then a Dockerfile, and the hosting decision.
+
+## What each test proves
+
+| script | what it holds down |
+|---|---|
+| `tools/compare.mjs` | 190 read requests, three sessions each, byte for byte |
+| `tools/pricing-diff.mjs` | 400 generated pricing cases through both engines |
+| `tools/admin-writes.mjs` | 49 admin refusals and round trips |
+| `tools/desk-writes.mjs` | 35 price-list, account and notification cases |
+| `tools/order-post.mjs` | the refusals, then one real order, then removed |
+| `tools/stock-race.mjs` | two concurrent orders for the last unit; one wins |
+| `tools/auth-interop.mjs` | a cookie from either API is accepted by the other |
+
+Three of them write. All three make their own rows, count what was there
+before and after, and fail loudly if anything is left behind — a test script
+in this project once deleted a real catalogue part because it picked "the
+first product in the list" instead of making one.
 
 ## How a port is checked
 

@@ -66,6 +66,10 @@ if (app.Environment.IsDevelopment())
     // Deletes an order and gives back the stock it held, so a test can place
     // a real one and not leave it behind.
     app.MapOrderProbe();
+
+    // Likewise for a notification: neither API can unsend one, so a test that
+    // sends a real message needs a way to take it back out.
+    app.MapNotificationProbe();
 }
 
 app.UseCors(StorefrontCors);
@@ -91,6 +95,8 @@ app.MapAdminDeskEndpoints();
 app.MapAdminReferenceEndpoints();
 app.MapAdminSiteWriteEndpoints();
 app.MapAdminPricingWriteEndpoints();
+app.MapAdminPriceListWriteEndpoints();
 app.MapAdminCatalogueWriteEndpoints();
+app.MapAdminDeskWriteEndpoints();
 
 app.Run();
