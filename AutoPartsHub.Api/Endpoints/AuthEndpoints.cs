@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,6 +52,66 @@ public static class AuthEndpoints
             });
         });
 
+        // POST /api/auth/register { name, email, password, role, city }
+        app.MapPost("/api/auth/register", async (
+            RegisterRequest body, AutoPartsContext db, SessionTokens tokens,
+            HttpContext http, IHostEnvironment env, CancellationToken ct) =>
+        {
+            var name = (body.Name ?? "").Trim();
+            var email = (body.Email ?? "").Trim().ToLowerInvariant();
+            var password = body.Password ?? "";
+            var role = body.Role ?? Roles.Retail;
+            var city = (body.City ?? "").Trim() is { Length: > 0 } c ? c : null;
+
+            if (name.Length == 0 || email.Length == 0 || password.Length == 0)
+            {
+                return Results.BadRequest(new { error = "Please fill in all fields." });
+            }
+            if (password.Length < 6)
+            {
+                return Results.BadRequest(new { error = "Password must be at least 6 characters." });
+            }
+            // Self-registration cannot mint an admin, whatever the request body
+            // says. Compared against the two literals rather than run through
+            // Roles.Narrow, which would quietly turn "ADMIN" into "RETAIL" and
+            // open the account instead of refusing it.
+            if (role is not (Roles.B2B or Roles.Retail))
+            {
+                return Results.BadRequest(new { error = "Invalid account type." });
+            }
+
+            if (await db.Clients.AnyAsync(x => x.Email == email, ct))
+            {
+                return Results.Json(
+                    new { error = "An account with this email already exists." }, statusCode: 409);
+            }
+
+            // New accounts start on the Retail tier. B2B applicants are
+            // reviewed by an admin from /admin/clients and moved onto a
+            // negotiated tier later.
+            var retailTier = await db.ClientCategories
+                .Where(x => x.Name == "Retail").Select(x => x.Id).FirstOrDefaultAsync(ct);
+
+            // Ten rounds, because that is the cost the accounts already in the
+            // table were hashed at and the two APIs share one login. The
+            // library's own default is eleven.
+            var hash = BCrypt.Net.BCrypt.HashPassword(password, BcryptRounds);
+
+            var id = Ids.New();
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO "Client" ("id", "name", "email", "city", "role", "passwordHash", "categoryId")
+                VALUES ({id}, {name}, {email}, {city}, {role}, {hash}, {retailTier})
+                """, ct);
+
+            Issue(http, tokens, env, new SessionPayload(
+                id, Roles.Narrow(role), retailTier, name,
+                DateTimeOffset.UtcNow.Add(SessionTokens.MaxAge).ToUnixTimeMilliseconds()));
+
+            return Results.Json(
+                new { user = new { id, name, email, role = Roles.Narrow(role) } },
+                statusCode: 201);
+        });
+
         // POST /api/auth/logout
         app.MapPost("/api/auth/logout", (HttpContext http, IHostEnvironment env) =>
         {
@@ -91,6 +152,9 @@ public static class AuthEndpoints
         });
     }
 
+    /// <summary>The cost the accounts already in the table were hashed at.</summary>
+    private const int BcryptRounds = 10;
+
     /// <summary>
     /// A valid bcrypt hash of a value nothing will ever submit.
     /// </summary>
@@ -117,3 +181,6 @@ public static class AuthEndpoints
 }
 
 public record LoginRequest(string? Email, string? Password);
+
+public record RegisterRequest(
+    string? Name, string? Email, string? Password, string? Role, string? City);

@@ -134,6 +134,50 @@ for (const qs of [
   }
 }
 
+// The supplier pages, by the slug each one actually has, plus one that does
+// not exist. A supplier with no parts at all is worth reaching if there is
+// one: its breakdowns are empty and its fastest delivery is null, which is a
+// different shape from a supplier that simply has few.
+GROUPS.supplier = [];
+for (const s of (await (await fetch(`${NODE}/api/suppliers`)).json()).suppliers) {
+  GROUPS.supplier.push(['anonymous', `/api/suppliers/${s.slug}`]);
+}
+GROUPS.supplier.push(['anonymous', '/api/suppliers/no-such-supplier']);
+
+// A pasted list of part numbers. Written as POSTs but it reads nothing but
+// the catalogue, so it belongs with the comparisons rather than with the
+// write tests.
+GROUPS.bulk = [];
+{
+  const carried = search.products.slice(0, 3).map((p) => p.partNumber);
+  const spaced = carried[0] ? carried[0].replace(/(.)(?=.)/, '$1 ') : 'x';
+  for (const partNumbers of [
+    carried,
+    [spaced],
+    [carried[0], carried[0]],                    // the same number twice
+    ['  ', ''],                                  // nothing usable
+    ['!!!'],                                     // nothing left after normalising
+    ['NOSUCHPART'],
+    [...carried, 'NOSUCHPART', spaced],
+    [42, null, carried[0]],                      // not all of them are strings
+    Array.from({ length: 1001 }, (_, i) => carried[i % carried.length]),
+    // Numbers this catalogue does not stock, which resolve because one of its
+    // parts lists them as a replacement — the path a customer holding a
+    // competitor's catalogue actually takes.
+    ['438588', 'DF4293', '34 11 6 794 917'],
+    ['34116794917'],                             // the same, written closed up
+    // Both at once: `ACP 34 000S` is a part in its own right AND a
+    // cross-reference on another part, and the direct hit has to win.
+    ['ACP 34 000S', '438588'],
+  ]) {
+    for (const who of ['anonymous', 'retail', 'admin']) {
+      GROUPS.bulk.push([who, '/api/catalog/bulk', { partNumbers }]);
+    }
+  }
+  GROUPS.bulk.push(['anonymous', '/api/catalog/bulk', { partNumbers: 'brake' }]);
+  GROUPS.bulk.push(['anonymous', '/api/catalog/bulk', {}]);
+}
+
 GROUPS.account = [
   ['anonymous', '/api/cart'],
   ['retail', '/api/cart'],
@@ -165,21 +209,28 @@ for (const [name, cases] of Object.entries(groups)) {
   if (cases.length === 0) continue;
   console.log(`\n${name}`);
 
-  for (const [who, path] of cases) {
+  for (const [who, path, body] of cases) {
     total++;
     const cookie = cookies[who];
     if (cookie === null) { console.log(`  SKIP  ${who} could not sign in`); continue; }
 
-    const headers = cookie ? { cookie } : {};
+    // A case with a body is a POST. Only for endpoints that write nothing —
+    // the bulk lookup is the one, and it is here rather than in a write test
+    // because it is a read wearing a POST for the size of its request.
+    const options = {
+      headers: { ...(cookie ? { cookie } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body ? { method: 'POST', body: JSON.stringify(body) } : {}),
+    };
     const [a, b] = await Promise.all([
-      fetch(NODE + path, { headers }).then((r) => r.json()).catch((e) => ({ threw: String(e) })),
-      fetch(NET + path, { headers }).then((r) => r.json()).catch((e) => ({ threw: String(e) })),
+      fetch(NODE + path, options).then((r) => r.json()).catch((e) => ({ threw: String(e) })),
+      fetch(NET + path, options).then((r) => r.json()).catch((e) => ({ threw: String(e) })),
     ]);
 
+    const label = body ? `${path} ${JSON.stringify(body).slice(0, 52)}` : path;
     const diff = firstDifference(a, b);
-    if (!diff) { pass++; console.log(`  ok    ${who.padEnd(9)} ${path}`); }
+    if (!diff) { pass++; console.log(`  ok    ${who.padEnd(9)} ${label}`); }
     else {
-      console.log(`  DIFF  ${who.padEnd(9)} ${path}`);
+      console.log(`  DIFF  ${who.padEnd(9)} ${label}`);
       console.log(`    at ${diff}`);
     }
   }

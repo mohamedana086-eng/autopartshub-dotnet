@@ -67,9 +67,9 @@ if (app.Environment.IsDevelopment())
     // a real one and not leave it behind.
     app.MapOrderProbe();
 
-    // Likewise for a notification: neither API can unsend one, so a test that
-    // sends a real message needs a way to take it back out.
-    app.MapNotificationProbe();
+    // Likewise for a notification and an account: neither API can unsend one
+    // or close the other, so the tests that make real ones need a way back.
+    app.MapDeskProbes();
 }
 
 app.UseCors(StorefrontCors);
@@ -84,6 +84,8 @@ app.MapGet("/health/db", async (AutoPartsContext db) =>
         : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
 
 app.MapCatalogueEndpoints();
+app.MapSupplierPageEndpoints();
+app.MapBulkLookupEndpoints();
 app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
 app.MapProductEndpoints();
@@ -98,5 +100,6 @@ app.MapAdminPricingWriteEndpoints();
 app.MapAdminPriceListWriteEndpoints();
 app.MapAdminCatalogueWriteEndpoints();
 app.MapAdminDeskWriteEndpoints();
+app.MapAdminOrderWriteEndpoints();
 
 app.Run();

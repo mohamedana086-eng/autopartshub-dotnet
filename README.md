@@ -60,19 +60,26 @@ rather than domain.
 
 ## Where LINQ will not reach
 
-EF Core covers ordinary CRUD. These do not translate, and will be written as
-raw SQL through `FromSql`, the same statements the Node API already runs:
+EF Core covers ordinary CRUD. These do not translate, and are written as raw
+SQL through `SqlQuery` and `ExecuteSql` — the same statements the Node API
+runs:
 
 | | why |
 |---|---|
 | `SELECT … FOR UPDATE` | stock reservation takes real row locks at checkout |
 | `LATERAL` joins | the admin lists aggregate per row in one pass |
-| `ON CONFLICT` | every seed and upsert |
 | `unnest(…)` | a price-list upload is one statement per five thousand rows |
+| `regexp_replace` in a predicate | part numbers match with their separators stripped |
 | `word_similarity` | the fuzzy search, which needs pg_trgm |
 
 That is a normal way to use EF Core, and better supported than the equivalent
 escape hatch in the ORM this project just left.
+
+One thing to know before writing any of it: **every interpolation hole in an
+EF raw-SQL string becomes a parameter**, including one holding SQL. A shared
+`SELECT` clause spliced into two queries came back as
+`syntax error at or near "$1"`. The safety and the inconvenience are the same
+property, so that clause is written out twice.
 
 ## Checking a port that carries logic
 
@@ -88,61 +95,81 @@ differences. The generator is seeded, so a failure can be re-run.
 
 ## Progress
 
-**59 of 63 endpoints**, each verified against the live Node API.
+**All 63 endpoints are ported.** Every one has been sent the same requests as
+the API already serving customers, and answered the same way.
 
-Reads — every one of them, compared request for request:
+Reads, compared request for request across three sessions each — anonymous, a
+retail customer, an admin:
 
-- the catalogue: `/api/systems`, `/api/suppliers`, `/api/vehicles`,
-  `/api/vehicles/vin`, `/api/catalog/products/{id}`, `/api/catalog/search`
+- the catalogue: `/api/systems`, `/api/suppliers`, `/api/suppliers/{slug}`,
+  `/api/vehicles`, `/api/vehicles/vin`, `/api/catalog/products/{id}`,
+  `/api/catalog/search`, `/api/catalog/bulk`
 - the account: `/api/auth/session`, `/api/cart`, `/api/notifications`,
   `/api/orders`
 - the admin desk: stats, orders, carts, notifications, clients, products,
   images, stock, suppliers, warehouses, outlets, currencies, tiers, markup
   rules, price lists
 
-Writes, each with its own test that creates what it touches and removes it:
+Writes, each with a test that creates what it touches and takes it away again:
 
 - `POST`/`PATCH`/`DELETE` on suppliers, warehouses, outlets, currencies,
-  client tiers, markup rules, products
+  client tiers, markup rules, products, price lists
 - `PUT` on a product's images and its stock
-- `POST`/`PATCH`/`DELETE /api/admin/price-lists` — including the conversion
-  into the base currency, the duplicate-row rule, and the partial unique index
-  that allows only one active list
-- `PATCH /api/admin/clients/{id}`
-- `POST /api/admin/notifications`
+- `PATCH /api/admin/clients/{id}`, `POST /api/admin/notifications`
+- `PATCH /api/admin/orders/{id}` — the status, and the shelves with it
 - `PUT /api/cart`, `POST /api/orders`, `POST`/`PATCH /api/notifications`
-- `POST /api/auth/login`, `POST /api/auth/logout`
+- `POST /api/auth/login`, `/logout`, `/register`
 
 Not endpoints, but what the endpoints are made of: the pricing engine, and
 stock reservation — the part LINQ cannot express.
 
-Still to port:
+What is left is not porting: a Dockerfile, and the hosting decision.
 
-| | |
-|---|---|
-| `POST /api/auth/register` | opening an account — the one write that hashes a password |
-| `POST /api/catalog/bulk` | a pasted list of part numbers, priced |
-| `GET /api/suppliers/{slug}` | one supplier's public page |
-| `PATCH /api/admin/orders/{id}` | moving an order along its statuses |
+## Three things worth naming
 
-Then a Dockerfile, and the hosting decision.
+**A password hashed by either API is accepted by the other.** They use
+different bcrypt libraries, and only one of them had ever written a hash into
+this table. An account opened through .NET signs in on Node and the other way
+round, and the wrong password is still refused on both.
+
+**Shipping moves stock, and reversing it puts the stock back.** An order shown
+as shipped whose units were never drawn down is the discrepancy a warehouse
+finds at the next count and cannot explain, so the status and the shelf move in
+one transaction. The test walks an order processing → shipped → processing →
+shipped → paid and checks the shelf at every step: 20/3, 17/0, 20/3, 17/0,
+17/0.
+
+**When the shelf and the order disagree, nothing moves.** Deliberately
+arranged: an order holding three units, a shelf edited to say none are
+reserved. Shipping would drive `reserved` below zero, the CHECK refuses it, and
+both APIs answer 409 with the same sentence — with the status unchanged,
+because the update and the stock movement are in the same transaction.
 
 ## What each test proves
 
 | script | what it holds down |
 |---|---|
-| `tools/compare.mjs` | 190 read requests, three sessions each, byte for byte |
+| `tools/compare.mjs` | 232 read requests, three sessions each, byte for byte |
 | `tools/pricing-diff.mjs` | 400 generated pricing cases through both engines |
 | `tools/admin-writes.mjs` | 49 admin refusals and round trips |
 | `tools/desk-writes.mjs` | 35 price-list, account and notification cases |
+| `tools/account-order.mjs` | 29 registration, sign-in and order-status cases |
 | `tools/order-post.mjs` | the refusals, then one real order, then removed |
 | `tools/stock-race.mjs` | two concurrent orders for the last unit; one wins |
 | `tools/auth-interop.mjs` | a cookie from either API is accepted by the other |
 
-Three of them write. All three make their own rows, count what was there
-before and after, and fail loudly if anything is left behind — a test script
-in this project once deleted a real catalogue part because it picked "the
-first product in the list" instead of making one.
+Four of them write. All four make their own rows, count what was there before
+and after, and fail loudly if anything is left behind — a test script in this
+project once deleted a real catalogue part because it picked "the first product
+in the list" instead of making one. `npm run db:reconcile` in the other
+repository is the independent check that no shelf drifted.
+
+Three things the admin desk can create but cannot remove — an order, a
+notification, an account — have development-only probes to take them back out.
+They are not omissions in the API being worked around; an order is a record of
+a sale, a notification is something a person was told, and an account is
+somebody's history. The probes exist so a test can make a real one and not
+leave it behind.
 
 ## How a port is checked
 
