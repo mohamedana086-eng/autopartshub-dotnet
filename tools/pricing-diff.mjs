@@ -16,7 +16,33 @@
 // way, and numbers formatted differently inside the sentence a customer reads.
 import { resolvePrice } from '@/lib/pricing';
 
-const NET = 'http://localhost:5080/dev/price';
+const BASE = 'http://localhost:5080';
+const NET = `${BASE}/dev/price`;
+
+/**
+ * The cross-site token, fetched the way a browser gets it.
+ *
+ * tools/csrf.mjs does this for every other script, but this one is copied into
+ * the Node repo on its own to reach the TypeScript engine — so it cannot
+ * import a sibling and carries its own copy instead. Two dozen lines duplicated
+ * beats a harness that only runs where its imports happen to resolve.
+ *
+ * Kept rather than exempting the endpoint: an exemption has to be something
+ * the server can recognise about a request, and everything a server can
+ * recognise a forged request can also claim.
+ */
+const csrf = await (async () => {
+  const res = await fetch(`${BASE}/api/systems`);
+  const cookie = res.headers.getSetCookie()
+    .map((c) => c.split(';')[0])
+    .find((c) => c.startsWith('XSRF-TOKEN='));
+  return cookie ? cookie.slice('XSRF-TOKEN='.length) : null;
+})();
+
+if (!csrf) {
+  console.error('the API issued no XSRF-TOKEN cookie — is it running on :5080?');
+  process.exit(2);
+}
 
 // Deterministic, so a failure can be re-run. Mulberry32.
 let seed = 0x9e3779b9;
@@ -104,7 +130,13 @@ for (let i = 0; i < 400; i++) {
   const ts = resolvePrice(ctx, rules);
   const res = await fetch(NET, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Both halves, exactly as a browser sends them: the server set the
+      // cookie, and the page is expected to copy it into the header.
+      'X-XSRF-TOKEN': csrf,
+      cookie: `XSRF-TOKEN=${csrf}`,
+    },
     body: JSON.stringify(forNet(ctx, rules)),
   });
   if (!res.ok) {

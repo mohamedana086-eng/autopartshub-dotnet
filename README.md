@@ -148,6 +148,8 @@ runs:
 | `unnest(…)` | a price-list upload is one statement per five thousand rows |
 | `regexp_replace` in a predicate | part numbers match with their separators stripped |
 | `word_similarity` | the fuzzy search, which needs pg_trgm |
+| `COUNT(*) OVER ()` | the search's exact total, on the same pass as its rows |
+| `row_number() OVER (PARTITION BY …)` | the first three specifications *of each part*, not the first three overall |
 
 That is a normal way to use EF Core, and better supported than the equivalent
 escape hatch in the ORM this project just left.
@@ -229,7 +231,8 @@ because the update and the stock movement are in the same transaction.
 
 | script | what it holds down |
 |---|---|
-| `tools/compare.mjs` | 232 read requests, three sessions each, byte for byte |
+| `tools/compare.mjs` | 313 read requests, three sessions each, byte for byte |
+| `tools/search-snapshot.mjs` | 228 search responses against their own recorded past |
 | `tools/pricing-diff.mjs` | 400 generated pricing cases through both engines |
 | `tools/admin-writes.mjs` | 49 admin refusals and round trips |
 | `tools/desk-writes.mjs` | 35 price-list, account and notification cases |
@@ -260,6 +263,22 @@ right, but that it is indistinguishable from the one already serving
 customers. Where a response cannot match byte for byte, the difference gets
 explained before it gets accepted.
 
+That stops working the moment a change lands on *both* APIs, which is what
+happens whenever the port is finished and the product moves on. Two
+implementations of the same new mistake agree perfectly, and `compare.mjs`
+reports 313/313 while both are wrong. So `tools/search-snapshot.mjs` records
+what the search answers *today* — every query shape, as all three accounts —
+and checks one API against its own past rather than against its twin. The two
+harnesses fail on opposite mistakes, which is the only reason to have both.
+
+It is not proof on its own either. Pushing the search filters into SQL passed
+228/228 while quietly breaking one path: the fuzzy fallback reaches its rows by
+id, through a query that knows nothing about the filters, and no recorded case
+had ever combined a misspelling with a filter. The snapshot could only hold
+down the questions somebody had thought to ask. `compare.mjs` caught it,
+because only one of the two APIs had been changed yet — and the cases are in
+the snapshot now.
+
 ## The model, re-scaffolded
 
 `Data/Entities` is reverse-engineered rather than hand-written, and staying
@@ -276,6 +295,13 @@ whole connection string, password and all, in the error when it does. And it
 picks up `_prisma_migrations`, which has to be taken back out of the entities
 and the context: it is the migration ledger, the TypeScript runner still owns
 it, and modelling it would invite this project to start writing to it.
+
+One table is deliberately absent from `Data/Entities`: `ProductSpec`. Nothing
+here writes a specification — the Node importer and the seed do — and every
+read of one is the window-function query in `Catalogue/SpecQueries.cs`, which
+does not translate to LINQ anyway. A scaffolded entity would carry change
+tracking for rows this API never changes. The next re-scaffold will pick it up
+and that is fine; it is not needed before then.
 
 ## Tests that do not need the other API
 
