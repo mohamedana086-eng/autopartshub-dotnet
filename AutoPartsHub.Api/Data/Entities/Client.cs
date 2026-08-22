@@ -29,6 +29,8 @@ public partial class Client
 
     public string? SupplierId { get; set; }
 
+    public DateTime? EmailConfirmedAt { get; set; }
+
     public virtual Cart? Cart { get; set; }
 
     public virtual ClientCategory? Category { get; set; }
@@ -44,4 +46,6 @@ public partial class Client
     public virtual Client? SalesManager { get; set; }
 
     public virtual Supplier? Supplier { get; set; }
+
+    public virtual ICollection<VerificationToken> VerificationTokens { get; set; } = new List<VerificationToken>();
 }

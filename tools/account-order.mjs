@@ -16,8 +16,14 @@
 //
 // Both accounts and both orders are created here and removed here, on a part
 // this script owns.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const login = async (base, creds) => {
   const r = await fetch(`${base}/api/auth/login`, {

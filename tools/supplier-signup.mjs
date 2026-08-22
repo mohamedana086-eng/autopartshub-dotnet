@@ -13,8 +13,14 @@
 //
 // So the flow crosses over deliberately: registered through Node, checked on
 // both, approved through .NET, checked on both again.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const login = async (base, creds) => {
   const r = await fetch(`${base}/api/auth/login`, {

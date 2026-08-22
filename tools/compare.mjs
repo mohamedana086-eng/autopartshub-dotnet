@@ -13,8 +13,14 @@
 //
 // Cases are signed in as the account named, because almost every response is
 // priced for whoever is asking and the anonymous shape is only one of them.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const ACCOUNTS = {
   anonymous: null,

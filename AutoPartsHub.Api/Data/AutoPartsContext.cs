@@ -60,6 +60,8 @@ public partial class AutoPartsContext : DbContext
 
     public virtual DbSet<VehicleVariant> VehicleVariants { get; set; }
 
+    public virtual DbSet<VerificationToken> VerificationTokens { get; set; }
+
     public virtual DbSet<Warehouse> Warehouses { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -143,6 +145,9 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.CurrencyId).HasColumnName("currencyId");
             entity.Property(e => e.DiscountPercent).HasColumnName("discountPercent");
             entity.Property(e => e.Email).HasColumnName("email");
+            entity.Property(e => e.EmailConfirmedAt)
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("emailConfirmedAt");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.PasswordHash).HasColumnName("passwordHash");
             entity.Property(e => e.Role)
@@ -730,6 +735,36 @@ public partial class AutoPartsContext : DbContext
                 .HasForeignKey(d => d.ModelId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("VehicleVariant_modelId_fkey");
+        });
+
+        modelBuilder.Entity<VerificationToken>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("VerificationToken_pkey");
+
+            entity.ToTable("VerificationToken");
+
+            entity.HasIndex(e => new { e.ClientId, e.Purpose }, "VerificationToken_clientId_purpose_idx");
+
+            entity.HasIndex(e => e.TokenHash, "VerificationToken_tokenHash_key").IsUnique();
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ClientId).HasColumnName("clientId");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("createdAt");
+            entity.Property(e => e.ExpiresAt)
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("expiresAt");
+            entity.Property(e => e.Purpose).HasColumnName("purpose");
+            entity.Property(e => e.TokenHash).HasColumnName("tokenHash");
+            entity.Property(e => e.UsedAt)
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("usedAt");
+
+            entity.HasOne(d => d.Client).WithMany(p => p.VerificationTokens)
+                .HasForeignKey(d => d.ClientId)
+                .HasConstraintName("VerificationToken_clientId_fkey");
         });
 
         modelBuilder.Entity<Warehouse>(entity =>

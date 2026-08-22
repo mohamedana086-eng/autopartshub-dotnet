@@ -12,8 +12,14 @@
 // that two requests for the same last unit cannot both be told yes, and the
 // only way to ask is to send them together and hold the transactions open
 // while they overlap.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const login = async () => {
   const r = await fetch(`${NODE}/api/auth/login`, {

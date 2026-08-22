@@ -139,6 +139,11 @@ public static class AuthEndpoints
                     .Select(c => c.Name)
                     .FirstOrDefaultAsync();
 
+            var confirmedAt = await db.Clients
+                .Where(c => c.Id == session.UserId)
+                .Select(c => c.EmailConfirmedAt)
+                .FirstOrDefaultAsync();
+
             return Results.Ok(new
             {
                 user = new
@@ -147,6 +152,17 @@ public static class AuthEndpoints
                     name = session.Name,
                     role = session.Role,
                     tierName = tier ?? "Retail",
+                    // Read rather than carried in the cookie, for the same
+                    // reason the tier is: a session issued this morning
+                    // predates a confirmation made this afternoon, and the
+                    // banner asking them to confirm would sit there until the
+                    // cookie was next reissued.
+                    //
+                    // A boolean rather than the date. Nothing renders when it
+                    // happened, and sending it would put an account's
+                    // timestamps in front of anyone who opened the network tab
+                    // for no reason anybody asked for.
+                    emailConfirmed = confirmedAt is not null,
                 },
             });
         });

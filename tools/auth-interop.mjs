@@ -12,8 +12,14 @@
 // be signed out by the other — and an admin cookie minted by one must not be
 // accepted by the other unless it genuinely verifies. The test is therefore
 // both directions, plus the refusals.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const ADMIN = { email: 'admin@autopartshub.com', password: 'admin123' };
 

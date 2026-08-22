@@ -109,6 +109,12 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors(StorefrontCors);
 
+// After CORS, so a preflight is answered before anything is refused — a
+// browser that never gets its OPTIONS answered never sends the request the
+// token would have been on. Before every endpoint, including the health checks
+// and the dev probes: a route that wants out has to say so here.
+app.UseMiddleware<CsrfMiddleware>();
+
 // Liveness and readiness kept apart on purpose: a host that restarts the
 // container because the database blinked turns a brief outage into a longer one.
 app.MapGet("/health", () => Results.Ok(new { ok = true }));

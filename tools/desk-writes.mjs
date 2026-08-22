@@ -16,8 +16,14 @@
 //                 with its original row printed first and compared at the end.
 //   notifications have neither, so they go out for real and are taken back
 //                 out through the development-only probe.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const login = async () => {
   const r = await fetch(`${NODE}/api/auth/login`, {

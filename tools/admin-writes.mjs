@@ -12,8 +12,14 @@
 // catalogue part because it picked "the first product in the list" instead of
 // making one — the row counts at the end are here so that cannot happen
 // quietly again.
+import { installCsrf } from './csrf.mjs';
+
 const NODE = 'http://localhost:3000';
 const NET = 'http://localhost:5080';
+
+// Both APIs refuse a write without a matching cross-site token. A browser
+// gets that pairing for free; this makes every fetch below carry it too.
+await installCsrf(NODE, NET);
 
 const login = async () => {
   const r = await fetch(`${NODE}/api/auth/login`, {
