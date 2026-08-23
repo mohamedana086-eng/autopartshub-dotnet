@@ -11,14 +11,16 @@ public static class ProductEndpoints
     {
         // GET /api/catalog/products/<id> — detail view, priced for the caller's tier.
         app.MapGet("/api/catalog/products/{id}", async (
-            string id, AutoPartsContext db, SpecQueries specQueries, PricingContextLoader pricing,
-            HttpContext http, CancellationToken ct) =>
+            string id, AutoPartsContext db, SpecQueries specQueries, BarcodeQueries barcodeQueries,
+            PricingContextLoader pricing, HttpContext http, CancellationToken ct) =>
         {
             var product = (await db.Database.SqlQuery<ProductDetailRow>($"""
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                        p."description" AS "Description", p."stockDays" AS "StockDays",
                        p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                        p."partType" AS "PartType",
+                       p."packagingUnit" AS "PackagingUnit",
+                       p."quantityPerPackage" AS "QuantityPerPackage",
                        m."name" AS "ManufacturerName",
                        v."name" AS "SystemName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice",
@@ -73,6 +75,9 @@ public static class ProductEndpoints
             // All of them, not the three a result row shows. This is the page
             // the row was pointing at when it said there was more.
             var specs = (await specQueries.ForAsync([id], null, ct)).GetValueOrDefault(id) ?? [];
+            // Every code this part answers to. The page is where a warehouse
+            // looks one up, so all of them belong here.
+            var barcodes = (await barcodeQueries.ForAsync([id], ct)).GetValueOrDefault(id) ?? [];
 
             return Results.Ok(new
             {
@@ -94,6 +99,10 @@ public static class ProductEndpoints
                     // runtime. The badge answers "what am I buying", which is
                     // a question asked on the page you open to decide.
                     partType = product.PartType,
+                    // How the part is packed, and therefore what quantities it
+                    // sells in.
+                    packagingUnit = product.PackagingUnit,
+                    quantityPerPackage = product.QuantityPerPackage,
                     stockDays = product.StockDays,
                     price = priced?.FinalPrice ?? RequestPricing.PurchasePrice(product),
                     appliedRule = priced?.AppliedRule,
@@ -106,6 +115,7 @@ public static class ProductEndpoints
                     // this is where the rest of them are, which is the whole
                     // reason the row can afford to show only three.
                     specs,
+                    barcodes,
                     available = product.Available,
                     supplier = product.SupplierSlug is null ? null : new
                     {
@@ -131,6 +141,8 @@ public record ProductDetailRow(
     string? SupplierId,
     /// <summary>oem | aftermarket | substitute — what the customer would be buying.</summary>
     string PartType,
+    string PackagingUnit,
+    int QuantityPerPackage,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,

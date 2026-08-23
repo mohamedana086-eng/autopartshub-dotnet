@@ -68,6 +68,7 @@ builder.Services.AddSingleton(new SessionTokens(
 builder.Services.AddScoped<PricingContextLoader>();
 builder.Services.AddScoped<SearchQueries>();
 builder.Services.AddScoped<SpecQueries>();
+builder.Services.AddScoped<BarcodeQueries>();
 builder.Services.AddSingleton<AdminGate>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>

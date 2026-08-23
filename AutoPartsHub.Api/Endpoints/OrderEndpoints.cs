@@ -127,6 +127,8 @@ public static class OrderEndpoints
             var products = await db.Database.SqlQuery<PriceableProductRow>($"""
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                        p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
+                       p."packagingUnit" AS "PackagingUnit",
+                       p."quantityPerPackage" AS "QuantityPerPackage",
                        m."name" AS "ManufacturerName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice"
                 FROM "Product" p
@@ -151,6 +153,23 @@ public static class OrderEndpoints
                 return Results.Json(
                     new { error = "A part in your cart is no longer in the catalogue. Remove it and try again." },
                     statusCode: 409);
+            }
+
+            // Checked again here, not only in the basket. The basket is a
+            // convenience and this endpoint takes its items straight off the
+            // request — a client that never touched the basket, or one that
+            // was open while the packaging changed, reaches this with a
+            // quantity nobody can pick.
+            foreach (var p in products)
+            {
+                var quantity = wanted[p.Id];
+                if (Packaging.IsOrderableQuantity(quantity, p.QuantityPerPackage)) continue;
+
+                return Results.BadRequest(new
+                {
+                    error = $"{p.Name} ({p.PartNumber}): " +
+                            Packaging.Refusal(quantity, p.QuantityPerPackage, p.PackagingUnit),
+                });
             }
 
             var ctx = await pricing.LoadAsync(http, ct);
@@ -326,6 +345,10 @@ public record PriceableProductRow(
     string Name,
     double BasePrice,
     string? SupplierId,
+    /// <summary>What one package is called.</summary>
+    string PackagingUnit,
+    /// <summary>The step an order moves in. One means no constraint.</summary>
+    int QuantityPerPackage,
     string ManufacturerName,
     string SystemSlug,
     double? ListPrice) : IPriceable;

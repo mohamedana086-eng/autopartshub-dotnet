@@ -307,6 +307,11 @@ public static class SearchEndpoints
                     return new Scored(rank, HitsFor(p), new SearchProductDto(
                         p.Id, p.PartNumber, p.Name, p.ManufacturerName, p.SystemName, p.SystemSlug,
                         p.PartType,
+                        // How the part is packed, on the row rather than only
+                        // on its page: the quantity control steps by this, and
+                        // a customer who reaches the part expecting to buy one
+                        // of something sold in pairs has already been misled.
+                        p.PackagingUnit, p.QuantityPerPackage,
                         p.StockDays,
                         priced?.FinalPrice ?? RequestPricing.PurchasePrice(p),
                         priced?.AppliedRule,
@@ -598,6 +603,8 @@ public record SearchProductWithSpecsDto(
     string System,
     string SystemSlug,
     string PartType,
+    string PackagingUnit,
+    int QuantityPerPackage,
     int StockDays,
     double Price,
     string? AppliedRule,
@@ -612,6 +619,7 @@ public record SearchProductWithSpecsDto(
 {
     public SearchProductWithSpecsDto(SearchProductDto p, IReadOnlyList<Spec> specs, int specCount)
         : this(p.Id, p.PartNumber, p.Name, p.Manufacturer, p.System, p.SystemSlug, p.PartType,
+               p.PackagingUnit, p.QuantityPerPackage,
                p.StockDays, p.Price, p.AppliedRule, p.Image, p.Available, p.Supplier,
                p.MatchedOn, p.MatchedVia, p.MatchedViaManufacturer, specs, specCount)
     {
@@ -631,6 +639,10 @@ public record SearchProductDto(
     /// when nothing is filtered at all.
     /// </summary>
     string PartType,
+    /// <summary>What one package is called.</summary>
+    string PackagingUnit,
+    /// <summary>The step an order moves in. One means no constraint.</summary>
+    int QuantityPerPackage,
     int StockDays,
     double Price,
     string? AppliedRule,

@@ -78,6 +78,8 @@ public sealed class SearchQueries(AutoPartsContext db)
                    p."description" AS "Description", p."stockDays" AS "StockDays",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                    p."partType" AS "PartType",
+                   p."packagingUnit" AS "PackagingUnit",
+                   p."quantityPerPackage" AS "QuantityPerPackage",
                    m."name" AS "ManufacturerName",
                    v."name" AS "SystemName", v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -267,6 +269,8 @@ public sealed class SearchQueries(AutoPartsContext db)
                    p."description" AS "Description", p."stockDays" AS "StockDays",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                    p."partType" AS "PartType",
+                   p."packagingUnit" AS "PackagingUnit",
+                   p."quantityPerPackage" AS "QuantityPerPackage",
                    m."name" AS "ManufacturerName",
                    v."name" AS "SystemName", v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -420,6 +424,10 @@ public record SearchRow(
     string? SupplierId,
     /// <summary>oem | aftermarket | substitute — what the customer would be buying.</summary>
     string PartType,
+    /// <summary>What one package is called: piece, pair, set, box, pack, litre, metre, kit.</summary>
+    string PackagingUnit,
+    /// <summary>The step an order moves in. One means no constraint.</summary>
+    int QuantityPerPackage,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,
@@ -489,6 +497,8 @@ public record CountedSearchRow(
     double BasePrice,
     string? SupplierId,
     string PartType,
+    string PackagingUnit,
+    int QuantityPerPackage,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,
@@ -504,6 +514,7 @@ public record CountedSearchRow(
 {
     public SearchRow ToRow() => new(
         Id, PartNumber, Name, Description, StockDays, BasePrice, SupplierId, PartType,
+        PackagingUnit, QuantityPerPackage,
         ManufacturerName, SystemName, SystemSlug, ListPrice, ImageUrl, ImageAlt, Available,
         SupplierSlug, SupplierName, SupplierRating, SupplierReliability, SupplierAcceptsReturns);
 }

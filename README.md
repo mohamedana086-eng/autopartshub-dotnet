@@ -150,6 +150,7 @@ runs:
 | `word_similarity` | the fuzzy search, which needs pg_trgm |
 | `COUNT(*) OVER ()` | the search's exact total, on the same pass as its rows |
 | `row_number() OVER (PARTITION BY …)` | the first three specifications *of each part*, not the first three overall |
+| `ON CONFLICT … DO NOTHING` | a barcode another part already holds is skipped, not a failed import |
 
 That is a normal way to use EF Core, and better supported than the equivalent
 escape hatch in the ORM this project just left.
@@ -300,12 +301,14 @@ One table is deliberately absent from `Data/Entities`: `ProductSpec`. Nothing
 here writes a specification — the Node importer and the seed do — and every
 read of one is the window-function query in `Catalogue/SpecQueries.cs`, which
 does not translate to LINQ anyway. A scaffolded entity would carry change
-tracking for rows this API never changes. The next re-scaffold will pick it up
-and that is fine; it is not needed before then.
+tracking for rows this API never changes. `ProductBarcode` is absent for the same reason, and so are the two
+packaging columns on `Product` — which is why the basket reads them in SQL
+rather than through the entity. The next re-scaffold will pick all of it up
+and that is fine; none of it is needed before then.
 
 ## Tests that do not need the other API
 
-`dotnet test` — 182 cases, 143ms, no database and no network. Ported from the
+`dotnet test` — 314 cases, 143ms, no database and no network. Ported from the
 five vitest files in the other repository, which the comparison harness cannot
 replace: those run only while the Node API is alive, and the point of a port is
 that one day it will not be.
