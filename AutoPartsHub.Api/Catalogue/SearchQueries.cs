@@ -389,7 +389,14 @@ public sealed class SearchQueries(AutoPartsContext db)
                     word_similarity({needle}, lower(m."name")),
                     similarity(lower(p."partNumber"), {needle})
                   ) >= {FuzzyThreshold}
-            ORDER BY score DESC, p."name" ASC
+            -- Part number breaks the remaining tie. Two parts can score the
+            -- same AND be called the same thing — this catalogue has two
+            -- "Brake pad set, front" that tie at 0.5 on "brak pd" — and
+            -- without this they come back in whatever order the heap holds
+            -- them, which changes when unrelated rows are rewritten. The
+            -- ranked search already breaks ties this way; the fuzzy fallback
+            -- was missed.
+            ORDER BY score DESC, p."name" ASC, p."partNumber" ASC
             LIMIT 25
             """).ToListAsync(ct);
     }

@@ -1,3 +1,4 @@
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Vehicles;
 using Microsoft.EntityFrameworkCore;
@@ -20,7 +21,7 @@ public static class VehicleEndpoints
         // and engine are not readable from a VIN without a licensed database, so
         // the customer picks from those candidates rather than being told a
         // single answer.
-        app.MapGet("/api/vehicles/vin", async (string? vin, AutoPartsContext db) =>
+        app.MapGet("/api/vehicles/vin", async (string? vin, AutoPartsContext db, CancellationToken ct) =>
         {
             var parsed = Vin.Parse(vin ?? "");
             if (!parsed.Success) return Results.BadRequest(new { error = parsed.Error });
@@ -35,6 +36,12 @@ public static class VehicleEndpoints
 
             if (make is null)
             {
+                // Recorded even here. A manufacturer we do not carry is the
+                // clearest case of a lookup that failed a customer, and
+                // leaving it out would make the numbers look better than the
+                // service is.
+                await VinLog.RecordAsync(db, reading.Vin, reading.ModelYear, null, 0, ct);
+
                 return Results.Ok(new VinResponse(
                     reading.Vin, reading.Wmi, reading.ModelYear, reading.ModelYearIsEstimate,
                     reading.CheckDigitValid, null, [],
@@ -56,6 +63,13 @@ public static class VehicleEndpoints
                     v.Id, model.Id, $"{make.Name} {model.Name} {v.Name}",
                     v.EngineCode, v.Fuel, v.YearFrom, v.YearTo)))
                 .ToList();
+
+            // After the answer is assembled and before it is sent — a
+            // counter, whose every failure is swallowed. What is written down
+            // is a KIND of vehicle, never a vehicle: positions 1-8 and the
+            // model year, never the serial. The response is unchanged, which
+            // is why the comparison harness sees nothing new here.
+            await VinLog.RecordAsync(db, reading.Vin, year, make.Name, candidates.Count, ct);
 
             return Results.Ok(new VinResponse(
                 reading.Vin, reading.Wmi, year, reading.ModelYearIsEstimate, reading.CheckDigitValid,
