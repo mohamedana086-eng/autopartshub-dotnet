@@ -47,10 +47,28 @@ public static class PricingEngine
             .ThenByDescending(r => r.Priority)
             .FirstOrDefault();
 
-        // 1. Markup — one winner.
+        // 1. Markup — one winner, down a ladder of three rungs.
+        //
+        //      a matching rule       most specific wins, then priority
+        //      the goods category    what the shop decided this KIND is worth
+        //      the client category   the account's generic default
+        //
+        //  The middle rung sits where it does deliberately. A goods category
+        //  is a statement about this particular part — somebody put it in
+        //  "slow-moving" on purpose — where the client category default is a
+        //  catch-all for the buyer covering everything nobody has priced. The
+        //  more deliberate statement wins.
+        //
+        //  A rule still beats both, because a rule is how a category baseline
+        //  gets overridden for particular customers: "consumables are +35%,
+        //  but trade accounts pay +22%".
+        var categoryMarkup = ctx.GoodsCategoryMarkup;
+
         var markedUp = winner is not null
             ? ApplyMarkup(ctx.BasePrice, winner.Type, winner.Value)
-            : ApplyMarkup(ctx.BasePrice, MarkupType.Percent, ctx.ClientCategoryMarkupPercent);
+            : categoryMarkup is not null
+                ? ApplyMarkup(ctx.BasePrice, categoryMarkup.Type, categoryMarkup.Value)
+                : ApplyMarkup(ctx.BasePrice, MarkupType.Percent, ctx.ClientCategoryMarkupPercent);
 
         // 2. Discount. Clamped to 0–100: a negative one would quietly become a
         //    surcharge, and over 100 would pay the customer to take the part.
@@ -67,7 +85,14 @@ public static class PricingEngine
             ? Math.Round(((Round(discounted) - ctx.BasePrice) / ctx.BasePrice) * 1000, MidpointRounding.AwayFromZero) / 10
             : 0;
 
-        var markupLabel = winner?.Label ?? "Client category default markup";
+        // Names the rung that decided, not just the number. A customer asking
+        // why a part costs what it does gets an answer they can act on, and so
+        // does the person who has to explain it.
+        var markupLabel = winner is not null
+            ? winner.Label
+            : categoryMarkup is not null
+                ? $"{categoryMarkup.Label} category markup"
+                : "Client category default markup";
 
         return new PriceResult(
             BasePrice: ctx.BasePrice,
@@ -101,6 +126,11 @@ public static class PricingEngine
 
         if (!string.IsNullOrEmpty(rule.ClientCategoryId) && rule.ClientCategoryId != ctx.ClientCategoryId) return false;
         if (!string.IsNullOrEmpty(rule.SupplierId) && rule.SupplierId != ctx.SupplierId) return false;
+        // An unclassified part matches no category-scoped rule. Written
+        // against the rule's own value rather than the context's, so a part
+        // with no category falls through every one of them instead of
+        // matching the first.
+        if (!string.IsNullOrEmpty(rule.GoodsCategoryId) && rule.GoodsCategoryId != ctx.GoodsCategoryId) return false;
         if (!string.IsNullOrEmpty(rule.ManufacturerName)
             && !rule.ManufacturerName.Equals(ctx.ManufacturerName, StringComparison.OrdinalIgnoreCase)) return false;
         if (!string.IsNullOrEmpty(rule.VehicleSystemSlug) && rule.VehicleSystemSlug != ctx.VehicleSystemSlug) return false;
@@ -115,6 +145,7 @@ public static class PricingEngine
     private static int Specificity(MarkupRule rule) =>
         (string.IsNullOrEmpty(rule.ClientCategoryId) ? 0 : 1)
         + (string.IsNullOrEmpty(rule.SupplierId) ? 0 : 1)
+        + (string.IsNullOrEmpty(rule.GoodsCategoryId) ? 0 : 1)
         + (string.IsNullOrEmpty(rule.ManufacturerName) ? 0 : 1)
         + (string.IsNullOrEmpty(rule.VehicleSystemSlug) ? 0 : 1)
         + (string.IsNullOrEmpty(rule.PartNumberPrefix) ? 0 : 1)
@@ -137,6 +168,8 @@ public record MarkupRule(
     int Priority,
     string? ClientCategoryId,
     string? SupplierId,
+    /// <summary>Narrows the rule to one goods category. Null is "any".</summary>
+    string? GoodsCategoryId,
     string? ManufacturerName,
     string? VehicleSystemSlug,
     string? PartNumberPrefix,
@@ -159,7 +192,28 @@ public record PricingContext(
     string ClientCategoryId,
     double ClientCategoryMarkupPercent,
     double? DiscountPercent = null,
-    PricingCurrency? Currency = null);
+    PricingCurrency? Currency = null,
+    /// <summary>The goods category this part is in, or null if unclassified.</summary>
+    string? GoodsCategoryId = null,
+    /// <summary>
+    /// That category's own markup, already resolved by the caller.
+    ///
+    /// Passed in rather than looked up, so this stays a pure function of its
+    /// arguments — the same property that lets the engine be compared against
+    /// the TypeScript original over four hundred generated cases.
+    /// </summary>
+    GoodsCategoryMarkup? GoodsCategoryMarkup = null);
+
+/// <summary>
+/// A goods category's own markup — the baseline for everything in it.
+/// </summary>
+/// <remarks>
+/// Applied only when no rule matched. A rule scoped to the category is how the
+/// baseline gets overridden for particular customers, which is why a rule
+/// always wins: it is the more specific statement of the two.
+/// </remarks>
+/// <param name="Label">Named in <c>AppliedRule</c>, so a quote can say which category decided.</param>
+public record GoodsCategoryMarkup(string Label, MarkupType Type, double Value);
 
 /// <summary>Enough of a Currency row to convert and label a price.</summary>
 /// <param name="Rate">Units of this currency per one unit of the base. 1 on the base.</param>

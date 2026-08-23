@@ -235,6 +235,7 @@ GROUPS.admin = [];
 for (const path of ['/api/admin/stats', '/api/admin/orders', '/api/admin/carts', '/api/admin/notifications',
   '/api/admin/suppliers', '/api/admin/warehouses', '/api/admin/outlets', '/api/admin/currencies',
   '/api/admin/client-categories', '/api/admin/markup-rules', '/api/admin/price-lists',
+  '/api/admin/goods-categories', '/api/admin/goods-categories/no-such-category',
   '/api/admin/price-lists/no-such-list', '/api/admin/clients',
   '/api/admin/products', '/api/admin/products?q=brake', '/api/admin/products?q=bosch',
   '/api/admin/products/no-such-id/images', '/api/admin/products/no-such-id/stock']) {

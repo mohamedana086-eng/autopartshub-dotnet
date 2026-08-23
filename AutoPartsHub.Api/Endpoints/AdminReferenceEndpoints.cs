@@ -170,6 +170,7 @@ public static class AdminReferenceEndpoints
                        r."clientCategoryId" AS "ClientCategoryId",
                        cc."name" AS "ClientCategoryName",
                        r."supplierId" AS "SupplierId", s."name" AS "SupplierName",
+                       r."goodsCategoryId" AS "GoodsCategoryId", g."name" AS "GoodsCategoryName",
                        r."manufacturerName" AS "ManufacturerName",
                        r."vehicleSystemSlug" AS "VehicleSystemSlug",
                        r."partNumberPrefix" AS "PartNumberPrefix",
@@ -179,6 +180,7 @@ public static class AdminReferenceEndpoints
                 FROM "MarkupRule" r
                 LEFT JOIN "ClientCategory" cc ON cc."id" = r."clientCategoryId"
                 LEFT JOIN "Supplier" s ON s."id" = r."supplierId"
+                LEFT JOIN "GoodsCategory" g ON g."id" = r."goodsCategoryId"
                 ORDER BY r."priority" DESC
                 """).ToListAsync(ct);
 
@@ -189,7 +191,16 @@ public static class AdminReferenceEndpoints
             var systems = await db.VehicleSystems.OrderBy(v => v.Order)
                 .Select(v => new { slug = v.Slug, name = v.Name }).AsNoTracking().ToListAsync(ct);
 
-            return Results.Ok(new { rules, categories, suppliers, systems });
+            // Active only. A switched-off category still holds its parts and
+            // still prices nothing, but offering it in a dropdown would invite
+            // filing a new part into a category the shop has retired.
+            var goodsCategories = await db.Database.SqlQuery<NamedRow>($"""
+                SELECT "id" AS "Id", "name" AS "Name" FROM "GoodsCategory"
+                WHERE "active" ORDER BY "sortOrder" ASC, "name" ASC
+                """).ToListAsync(ct);
+
+            return Results.Ok(new { rules, categories, suppliers, systems,
+                goodsCategories = goodsCategories.Select(g => new { id = g.Id, name = g.Name }) });
         });
 
         // GET /api/admin/price-lists — every list, active first then newest.
@@ -351,7 +362,10 @@ public record AdminCategoryRow(
 
 public record AdminMarkupRuleRow(
     string Id, string Label, int Priority, string? ClientCategoryId, string? ClientCategoryName,
-    string? SupplierId, string? SupplierName, string? ManufacturerName, string? VehicleSystemSlug,
+    string? SupplierId, string? SupplierName,
+    /// <summary>The goods category this rule is narrowed to, and its name.</summary>
+    string? GoodsCategoryId, string? GoodsCategoryName,
+    string? ManufacturerName, string? VehicleSystemSlug,
     string? PartNumberPrefix, double? PurchasePriceFrom, double? PurchasePriceTo,
     string Type, double Value, bool Active);
 

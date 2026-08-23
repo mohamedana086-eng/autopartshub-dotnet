@@ -232,7 +232,7 @@ because the update and the stock movement are in the same transaction.
 
 | script | what it holds down |
 |---|---|
-| `tools/compare.mjs` | 313 read requests, three sessions each, byte for byte |
+| `tools/compare.mjs` | 319 read requests, three sessions each, byte for byte |
 | `tools/search-snapshot.mjs` | 228 search responses against their own recorded past |
 | `tools/pricing-diff.mjs` | 400 generated pricing cases through both engines |
 | `tools/admin-writes.mjs` | 49 admin refusals and round trips |
@@ -301,14 +301,15 @@ One table is deliberately absent from `Data/Entities`: `ProductSpec`. Nothing
 here writes a specification — the Node importer and the seed do — and every
 read of one is the window-function query in `Catalogue/SpecQueries.cs`, which
 does not translate to LINQ anyway. A scaffolded entity would carry change
-tracking for rows this API never changes. `ProductBarcode` is absent for the same reason, and so are the two
-packaging columns on `Product` — which is why the basket reads them in SQL
+tracking for rows this API never changes. `ProductBarcode` and `GoodsCategory` are absent for the same reason, and so
+are the packaging columns on `Product`, its `goodsCategoryId`, and the one on
+`MarkupRule` — which is why the basket reads them in SQL
 rather than through the entity. The next re-scaffold will pick all of it up
 and that is fine; none of it is needed before then.
 
 ## Tests that do not need the other API
 
-`dotnet test` — 314 cases, 143ms, no database and no network. Ported from the
+`dotnet test` — 324 cases, 143ms, no database and no network. Ported from the
 five vitest files in the other repository, which the comparison harness cannot
 replace: those run only while the Node API is alive, and the point of a port is
 that one day it will not be.

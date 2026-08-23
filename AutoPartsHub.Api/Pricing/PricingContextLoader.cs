@@ -51,19 +51,55 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         // Ordered by id, because the engine sorts by specificity then priority
         // and leaves a tie to input order. Heap order settled that before,
         // which is to say nothing settled it.
-        var rules = await db.MarkupRules
-            .Where(r => r.Active)
-            .OrderBy(r => r.Id)
+        // Raw SQL rather than LINQ over the entity: the scaffolded model does
+        // not carry goodsCategoryId, the same way it does not carry partType,
+        // and columns added since are read this way rather than by
+        // hand-editing something generated.
+        var ruleRows = await db.Database.SqlQuery<MarkupRuleRow>($"""
+            SELECT "id" AS "Id", "label" AS "Label", "priority" AS "Priority",
+                   "clientCategoryId" AS "ClientCategoryId", "supplierId" AS "SupplierId",
+                   "goodsCategoryId" AS "GoodsCategoryId",
+                   "manufacturerName" AS "ManufacturerName",
+                   "vehicleSystemSlug" AS "VehicleSystemSlug",
+                   "partNumberPrefix" AS "PartNumberPrefix",
+                   "purchasePriceFrom" AS "PurchasePriceFrom",
+                   "purchasePriceTo" AS "PurchasePriceTo",
+                   "type" AS "Type", "value" AS "Value", "active" AS "Active"
+            FROM "MarkupRule"
+            WHERE "active"
+            ORDER BY "id" ASC
+            """).ToListAsync(ct);
+
+        var rules = ruleRows
             .Select(r => new MarkupRule(
                 r.Id, r.Label, r.Priority, r.ClientCategoryId, r.SupplierId,
+                r.GoodsCategoryId,
                 r.ManufacturerName, r.VehicleSystemSlug, r.PartNumberPrefix,
                 r.PurchasePriceFrom, r.PurchasePriceTo,
-                r.Type == "AMOUNT" ? MarkupType.Amount
-                    : r.Type == "FIXED" ? MarkupType.Fixed
-                    : MarkupType.Percent,
+                ReadMarkupType(r.Type),
                 r.Value, r.Active))
-            .AsNoTracking()
-            .ToListAsync(ct);
+            .ToList();
+
+        // The goods categories that price something, as a lookup rather than a
+        // join on every priceable query.
+        //
+        // A part's row carries only its category id; the markup itself is the
+        // same handful of rows for every part in a response, so loading them
+        // once beside the rules costs one round trip instead of a join on
+        // search, the part page, bulk, the basket and the order.
+        //
+        // Only the active ones with a markup set: a switched-off category, or
+        // one that is purely organisational, prices nothing.
+        var categoryRows = await db.Database.SqlQuery<GoodsCategoryMarkupRow>($"""
+            SELECT "id" AS "Id", "name" AS "Name",
+                   "markupType" AS "MarkupType", "markupValue" AS "MarkupValue"
+            FROM "GoodsCategory"
+            WHERE "active" AND "markupType" IS NOT NULL AND "markupValue" IS NOT NULL
+            """).ToListAsync(ct);
+
+        var goodsCategoryMarkups = categoryRows.ToDictionary(
+            g => g.Id,
+            g => new GoodsCategoryMarkup(g.Name, ReadMarkupType(g.MarkupType), g.MarkupValue));
 
         var currency = account is { CurrencyCode: not null, CurrencySymbol: not null, CurrencyRate: not null }
             ? new PricingCurrency(account.CurrencyCode, account.CurrencySymbol, account.CurrencyRate.Value)
@@ -76,8 +112,35 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             TierName: account?.CategoryName ?? "Retail",
             IsLoggedIn: session is not null,
             DiscountPercent: account?.DiscountPercent ?? 0,
-            Currency: currency);
+            Currency: currency,
+            GoodsCategoryMarkups: goodsCategoryMarkups);
     }
+
+    /// <summary>
+    /// The stored word as the engine's enum.
+    /// </summary>
+    /// <remarks>
+    /// Anything unrecognised reads as PERCENT, which is what the column
+    /// defaults to and what the check constraint keeps it to. Shared between
+    /// the rules and the categories because they are the same three kinds —
+    /// two copies would disagree the day a fourth is added.
+    /// </remarks>
+    private static MarkupType ReadMarkupType(string stored) => stored switch
+    {
+        "AMOUNT" => MarkupType.Amount,
+        "FIXED" => MarkupType.Fixed,
+        _ => MarkupType.Percent,
+    };
+
+    private record MarkupRuleRow(
+        string Id, string Label, int Priority,
+        string? ClientCategoryId, string? SupplierId, string? GoodsCategoryId,
+        string? ManufacturerName, string? VehicleSystemSlug, string? PartNumberPrefix,
+        double? PurchasePriceFrom, double? PurchasePriceTo,
+        string Type, double Value, bool Active);
+
+    private record GoodsCategoryMarkupRow(
+        string Id, string Name, string MarkupType, double MarkupValue);
 
     private record AccountRow(
         double? DiscountPercent,
@@ -96,7 +159,14 @@ public record RequestPricing(
     string TierName,
     bool IsLoggedIn,
     double DiscountPercent,
-    PricingCurrency? Currency)
+    PricingCurrency? Currency,
+    /// <summary>
+    /// Every goods category that prices something, by id.
+    ///
+    /// A lookup rather than a join: the same handful of rows applies to every
+    /// part in a response.
+    /// </summary>
+    Dictionary<string, GoodsCategoryMarkup> GoodsCategoryMarkups)
 {
     /// <summary>
     /// Prices one row, or null when there is no tier to price against — which
@@ -118,7 +188,14 @@ public record RequestPricing(
             ClientCategoryId: CategoryId,
             ClientCategoryMarkupPercent: CategoryMarkupPercent.Value,
             DiscountPercent: DiscountPercent,
-            Currency: Currency), Rules);
+            Currency: Currency,
+            GoodsCategoryId: row.GoodsCategoryId,
+            // Null where the part has no category, or where its category holds
+            // no opinion about price — the lookup only holds the ones that do,
+            // so both cases come out of it the same way.
+            GoodsCategoryMarkup: row.GoodsCategoryId is null
+                ? null
+                : GoodsCategoryMarkups.GetValueOrDefault(row.GoodsCategoryId)), Rules);
     }
 
     /// <summary>
@@ -137,4 +214,12 @@ public interface IPriceable
     string ManufacturerName { get; }
     string SystemSlug { get; }
     double? ListPrice { get; }
+    /// <summary>
+    /// The commercial category the part is in, or null.
+    ///
+    /// Only the id: the markup it carries is loaded once per request with the
+    /// rules, because it is the same handful of rows for every part in a
+    /// response.
+    /// </summary>
+    string? GoodsCategoryId { get; }
 }
