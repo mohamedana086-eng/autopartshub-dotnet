@@ -22,6 +22,7 @@ public static class ProductEndpoints
                        p."packagingUnit" AS "PackagingUnit",
                        p."quantityPerPackage" AS "QuantityPerPackage",
                        p."goodsCategoryId" AS "GoodsCategoryId",
+                       p."weightGrams" AS "WeightGrams",
                        m."name" AS "ManufacturerName",
                        v."name" AS "SystemName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice",
@@ -104,6 +105,8 @@ public static class ProductEndpoints
                     // sells in.
                     packagingUnit = product.PackagingUnit,
                     quantityPerPackage = product.QuantityPerPackage,
+                    /* What one piece weighs, in grams. Null where nobody has weighed it. */
+                    weightGrams = product.WeightGrams,
                     stockDays = product.StockDays,
                     price = priced?.FinalPrice ?? RequestPricing.PurchasePrice(product),
                     appliedRule = priced?.AppliedRule,
@@ -145,6 +148,7 @@ public record ProductDetailRow(
     string PackagingUnit,
     int QuantityPerPackage,
     string? GoodsCategoryId,
+    int? WeightGrams,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,

@@ -189,7 +189,17 @@ public static class CartEndpoints
                 // and offers numbers checkout refuses.
                 packagingUnit = line.PackagingUnit,
                 quantityPerPackage = line.QuantityPerPackage,
+                /* Per piece, in grams. Null where nobody has weighed the part. */
+                weightGrams = line.WeightGrams,
             }),
+            // What the basket weighs, and whether that is the whole of it.
+            //
+            // Both halves, because a part nobody has weighed makes the number
+            // a floor rather than a fact — and a shipping figure built on a
+            // floor is wrong in the direction that costs money. Counting the
+            // unknowns as zero would produce something that looks like an
+            // answer.
+            weight = Weight.Sum(lines.Select(l => new WeighedLine(l.WeightGrams, l.Quantity))),
         };
     }
 
@@ -203,6 +213,7 @@ public static class CartEndpoints
                    p."packagingUnit" AS "PackagingUnit",
                    p."quantityPerPackage" AS "QuantityPerPackage",
                    p."goodsCategoryId" AS "GoodsCategoryId",
+                   p."weightGrams" AS "WeightGrams",
                    m."name" AS "ManufacturerName",
                    v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -301,4 +312,6 @@ public record BasketLineRow(
     /// <summary>The step this line moves in. One means no constraint.</summary>
     int QuantityPerPackage,
     /// <summary>The commercial category the part is priced through, or null.</summary>
-    string? GoodsCategoryId) : IPriceable;
+    string? GoodsCategoryId,
+    /// <summary>Per piece, in grams. Null where nobody has weighed the part.</summary>
+    int? WeightGrams) : IPriceable;

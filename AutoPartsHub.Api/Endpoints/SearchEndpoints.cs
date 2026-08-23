@@ -312,6 +312,9 @@ public static class SearchEndpoints
                         // a customer who reaches the part expecting to buy one
                         // of something sold in pairs has already been misled.
                         p.PackagingUnit, p.QuantityPerPackage,
+                        // On the row so a basket assembled from search results
+                        // can total itself without asking again.
+                        p.WeightGrams,
                         p.StockDays,
                         priced?.FinalPrice ?? RequestPricing.PurchasePrice(p),
                         priced?.AppliedRule,
@@ -605,6 +608,7 @@ public record SearchProductWithSpecsDto(
     string PartType,
     string PackagingUnit,
     int QuantityPerPackage,
+    int? WeightGrams,
     int StockDays,
     double Price,
     string? AppliedRule,
@@ -619,7 +623,7 @@ public record SearchProductWithSpecsDto(
 {
     public SearchProductWithSpecsDto(SearchProductDto p, IReadOnlyList<Spec> specs, int specCount)
         : this(p.Id, p.PartNumber, p.Name, p.Manufacturer, p.System, p.SystemSlug, p.PartType,
-               p.PackagingUnit, p.QuantityPerPackage,
+               p.PackagingUnit, p.QuantityPerPackage, p.WeightGrams,
                p.StockDays, p.Price, p.AppliedRule, p.Image, p.Available, p.Supplier,
                p.MatchedOn, p.MatchedVia, p.MatchedViaManufacturer, specs, specCount)
     {
@@ -643,6 +647,8 @@ public record SearchProductDto(
     string PackagingUnit,
     /// <summary>The step an order moves in. One means no constraint.</summary>
     int QuantityPerPackage,
+    /// <summary>What one piece weighs, in grams. Null where nobody has weighed it.</summary>
+    int? WeightGrams,
     int StockDays,
     double Price,
     string? AppliedRule,

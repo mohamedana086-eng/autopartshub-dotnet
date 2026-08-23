@@ -309,7 +309,7 @@ and that is fine; none of it is needed before then.
 
 ## Tests that do not need the other API
 
-`dotnet test` — 324 cases, 143ms, no database and no network. Ported from the
+`dotnet test` — 341 cases, 143ms, no database and no network. Ported from the
 five vitest files in the other repository, which the comparison harness cannot
 replace: those run only while the Node API is alive, and the point of a port is
 that one day it will not be.

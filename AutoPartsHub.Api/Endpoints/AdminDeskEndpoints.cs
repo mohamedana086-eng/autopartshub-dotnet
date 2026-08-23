@@ -78,7 +78,8 @@ public static class AdminDeskEndpoints
                 SELECT o."id" AS "Id", o."reference" AS "Reference",
                        cl."name" AS "ClientName", o."status" AS "Status",
                        o."createdAt" AS "CreatedAt",
-                       o."currencyCode" AS "CurrencyCode", o."currencyRate" AS "CurrencyRate"
+                       o."currencyCode" AS "CurrencyCode", o."currencyRate" AS "CurrencyRate",
+                       o."weightGrams" AS "WeightGrams", o."weightComplete" AS "WeightComplete"
                 FROM "Order" o
                 JOIN "Client" cl ON cl."id" = o."clientId"
                 WHERE ({scope}::text IS NULL OR cl."salesManagerId" = {scope})
@@ -148,6 +149,8 @@ public static class AdminDeskEndpoints
                         total,
                         quotedTotal = Money.Round(total * o.CurrencyRate),
                         currencyCode = o.CurrencyCode,
+                        weightGrams = o.WeightGrams,
+                        weightComplete = o.WeightComplete,
                     };
                 }),
             });
@@ -283,7 +286,8 @@ public record DashboardRow(int Products, int Clients, int Orders, int ActiveRule
 
 public record AdminOrderRow(
     string Id, string Reference, string ClientName, string Status,
-    DateTime CreatedAt, string CurrencyCode, double CurrencyRate);
+    DateTime CreatedAt, string CurrencyCode, double CurrencyRate,
+    int WeightGrams, bool WeightComplete);
 
 public record AdminOrderLineRow(
     string OrderId, string ProductId, string PartNumber, string Name,
