@@ -89,10 +89,46 @@ public static class CartEndpoints
             // "Still in the catalogue" includes whether anyone is selling it.
             // A part behind a switched-off supplier is refused on the way into
             // a basket, which is the earliest place to say no.
-            var known = await db.Products
-                .Where(p => ids.Contains(p.Id) && (p.SupplierId == null || p.Supplier!.Active))
-                .Select(p => p.Id)
-                .ToListAsync(ct);
+            // Raw SQL rather than LINQ over the entity, because the packaging
+            // columns are not on it — the scaffolded model does not carry
+            // partType either, and columns added since are read this way
+            // rather than by hand-editing something generated. It also puts
+            // this query in the same shape as the Node one it has to agree
+            // with.
+            var carried = await db.Database.SqlQuery<CartPackagingRow>($"""
+                SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
+                       p."packagingUnit" AS "PackagingUnit",
+                       p."quantityPerPackage" AS "QuantityPerPackage"
+                FROM "Product" p
+                WHERE p."id" = ANY({ids}::text[])
+                -- "Still in the catalogue" includes whether anyone is selling
+                -- it. A part behind a switched-off supplier is refused on the
+                -- way into a basket, which is the earliest place to say no.
+                AND (p."supplierId" IS NULL OR EXISTS (
+                  SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
+                ))
+                """).ToListAsync(ct);
+
+            // Refused on the way into the basket rather than at checkout.
+            //
+            // The basket is where a customer changes their mind about a
+            // number, so it is where the number should be argued with. Finding
+            // out at checkout that a part cannot be split means going back to
+            // a screen they had finished with, and the message would have to
+            // name a part they can no longer see.
+            foreach (var part in carried)
+            {
+                var quantity = wanted[part.Id];
+                if (Packaging.IsOrderableQuantity(quantity, part.QuantityPerPackage)) continue;
+
+                return Results.BadRequest(new
+                {
+                    error = $"{part.Name} ({part.PartNumber}): " +
+                            Packaging.Refusal(quantity, part.QuantityPerPackage, part.PackagingUnit),
+                });
+            }
+
+            var known = carried;
             if (known.Count != ids.Length)
             {
                 // A part deleted from the catalogue since it was added. Naming
@@ -147,6 +183,12 @@ public static class CartEndpoints
                 // saved last week has no claim on stock since sold. Null means
                 // nobody counted the part, which sells nothing.
                 available = Availability.Sellable(line.Available),
+                // Sent so the basket's quantity control can step by the
+                // package after a reload, when the part page it was added
+                // from is long gone. Without this the control steps by one
+                // and offers numbers checkout refuses.
+                packagingUnit = line.PackagingUnit,
+                quantityPerPackage = line.QuantityPerPackage,
             }),
         };
     }
@@ -158,6 +200,8 @@ public static class CartEndpoints
                    p."partNumber" AS "PartNumber", p."name" AS "Name",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                    p."stockDays" AS "StockDays",
+                   p."packagingUnit" AS "PackagingUnit",
+                   p."quantityPerPackage" AS "QuantityPerPackage",
                    m."name" AS "ManufacturerName",
                    v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -228,6 +272,15 @@ public static class CartEndpoints
     }
 }
 
+/// <summary>What the basket needs to know about a part before it accepts one.</summary>
+public record CartPackagingRow(
+    string Id,
+    string PartNumber,
+    string Name,
+    string PackagingUnit,
+    int QuantityPerPackage);
+
+
 
 /// <summary>One basket line, flat and priced from the caller's tier.</summary>
 public record BasketLineRow(
@@ -241,4 +294,8 @@ public record BasketLineRow(
     string ManufacturerName,
     string SystemSlug,
     double? ListPrice,
-    int? Available) : IPriceable;
+    int? Available,
+    /// <summary>What one package is called.</summary>
+    string PackagingUnit,
+    /// <summary>The step this line moves in. One means no constraint.</summary>
+    int QuantityPerPackage) : IPriceable;
