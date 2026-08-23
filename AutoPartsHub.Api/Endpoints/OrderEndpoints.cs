@@ -22,12 +22,18 @@ public static class OrderEndpoints
             var session = tokens.Decode(http.Request.Cookies[SessionTokens.CookieName]);
             if (session is null) return Results.Json(new { error = "Not signed in." }, statusCode: 401);
 
-            var orders = await db.Orders
-                .Where(o => o.ClientId == session.UserId)
-                .OrderByDescending(o => o.CreatedAt)
-                .Select(o => new { o.Id, o.Reference, o.Status, o.CreatedAt, o.CurrencyCode, o.CurrencyRate })
-                .AsNoTracking()
-                .ToListAsync(ct);
+            // Raw SQL rather than LINQ over the entity: the scaffolded model
+            // does not carry the weight columns, the same way it does not
+            // carry partType, and columns added since are read this way.
+            var orders = await db.Database.SqlQuery<CustomerOrderRow>($"""
+                SELECT "id" AS "Id", "reference" AS "Reference", "status" AS "Status",
+                       "createdAt" AS "CreatedAt",
+                       "currencyCode" AS "CurrencyCode", "currencyRate" AS "CurrencyRate",
+                       "weightGrams" AS "WeightGrams", "weightComplete" AS "WeightComplete"
+                FROM "Order"
+                WHERE "clientId" = {session.UserId}
+                ORDER BY "createdAt" DESC
+                """).ToListAsync(ct);
 
             var orderIds = orders.Select(o => o.Id).ToArray();
             var lines = await db.OrderItems
@@ -64,6 +70,14 @@ public static class OrderEndpoints
                         units = mine.Sum(l => l.Quantity),
                         total = Money.Round(mine.Sum(l => l.UnitPrice * l.Quantity) * o.CurrencyRate),
                         currencyCode = o.CurrencyCode,
+                        // What the order weighed, in grams, as recorded when
+                        // it was placed.  false means a
+                        // line's part had no weight on file, so the figure is
+                        // a floor rather than a fact — and a shipping cost
+                        // built on it is wrong in the direction that costs
+                        // money. Both halves travel together for that reason.
+                        weightGrams = o.WeightGrams,
+                        weightComplete = o.WeightComplete,
                         lines = mine.Select(l => new
                         {
                             partNumber = l.PartNumber,
@@ -130,6 +144,7 @@ public static class OrderEndpoints
                        p."packagingUnit" AS "PackagingUnit",
                        p."quantityPerPackage" AS "QuantityPerPackage",
                        p."goodsCategoryId" AS "GoodsCategoryId",
+                       p."weightGrams" AS "WeightGrams",
                        m."name" AS "ManufacturerName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice"
                 FROM "Product" p
@@ -216,7 +231,13 @@ public static class OrderEndpoints
 
             try
             {
-                var placed = await PlaceAsync(db, session.UserId, currencyCode, rate,
+                // Weighed from the same rows the prices came from, so the
+                // figure recorded on the order describes the parts it was
+                // actually placed for.
+                var weight = Weight.Sum(products.Select(
+                    p => new WeighedLine(p.WeightGrams, wanted[p.Id])));
+
+                var placed = await PlaceAsync(db, session.UserId, currencyCode, rate, weight,
                     lines.Select(l => (l.productId, l.quantity, l.unitPrice)).ToList(), ct);
 
                 return Results.Json(new
@@ -267,6 +288,7 @@ public static class OrderEndpoints
     /// </remarks>
     private static async Task<PlacedOrder> PlaceAsync(
         AutoPartsContext db, string clientId, string currencyCode, double rate,
+        WeightTotal weight,
         List<(string ProductId, int Quantity, double UnitPrice)> lines, CancellationToken ct)
     {
         for (var attempt = 0; attempt < 5; attempt++)
@@ -277,8 +299,10 @@ public static class OrderEndpoints
                 var orderId = Ids.New();
 
                 var order = (await db.Database.SqlQuery<PlacedOrder>($"""
-                    INSERT INTO "Order" ("id", "reference", "clientId", "currencyCode", "currencyRate")
-                    VALUES ({orderId}, {Reference()}, {clientId}, {currencyCode}, {rate})
+                    INSERT INTO "Order" ("id", "reference", "clientId", "currencyCode", "currencyRate",
+                                        "weightGrams", "weightComplete")
+                    VALUES ({orderId}, {Reference()}, {clientId}, {currencyCode}, {rate},
+                            {weight.Grams}, {weight.Complete})
                     RETURNING "id" AS "Id", "reference" AS "Reference",
                               "status" AS "Status", "createdAt" AS "CreatedAt"
                     """).ToListAsync(ct)).Single();
@@ -352,6 +376,8 @@ public record PriceableProductRow(
     int QuantityPerPackage,
     /// <summary>The commercial category the part is priced through, or null.</summary>
     string? GoodsCategoryId,
+    /// <summary>Per piece, in grams. Null where nobody has weighed the part.</summary>
+    int? WeightGrams,
     string ManufacturerName,
     string SystemSlug,
     double? ListPrice) : IPriceable;
@@ -379,3 +405,12 @@ public static class Money
     public static string Format(double value) =>
         value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 }
+
+/// <summary>One of a customer's own orders, as the list reads it.</summary>
+public record CustomerOrderRow(
+    string Id, string Reference, string Status, DateTime CreatedAt,
+    string CurrencyCode, double CurrencyRate,
+    /// <summary>What it weighed when it was placed, in grams.</summary>
+    int WeightGrams,
+    /// <summary>False when a line's part had no weight, making the figure a floor.</summary>
+    bool WeightComplete);

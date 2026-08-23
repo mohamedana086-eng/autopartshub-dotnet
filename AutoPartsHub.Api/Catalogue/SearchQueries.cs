@@ -81,6 +81,7 @@ public sealed class SearchQueries(AutoPartsContext db)
                    p."packagingUnit" AS "PackagingUnit",
                    p."quantityPerPackage" AS "QuantityPerPackage",
                    p."goodsCategoryId" AS "GoodsCategoryId",
+                   p."weightGrams" AS "WeightGrams",
                    m."name" AS "ManufacturerName",
                    v."name" AS "SystemName", v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -273,6 +274,7 @@ public sealed class SearchQueries(AutoPartsContext db)
                    p."packagingUnit" AS "PackagingUnit",
                    p."quantityPerPackage" AS "QuantityPerPackage",
                    p."goodsCategoryId" AS "GoodsCategoryId",
+                   p."weightGrams" AS "WeightGrams",
                    m."name" AS "ManufacturerName",
                    v."name" AS "SystemName", v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -432,6 +434,8 @@ public record SearchRow(
     int QuantityPerPackage,
     /// <summary>The commercial category the part is priced through, or null.</summary>
     string? GoodsCategoryId,
+    /// <summary>What one piece weighs, in grams. Null where nobody has weighed it.</summary>
+    int? WeightGrams,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,
@@ -504,6 +508,7 @@ public record CountedSearchRow(
     string PackagingUnit,
     int QuantityPerPackage,
     string? GoodsCategoryId,
+    int? WeightGrams,
     string ManufacturerName,
     string SystemName,
     string SystemSlug,
@@ -519,7 +524,7 @@ public record CountedSearchRow(
 {
     public SearchRow ToRow() => new(
         Id, PartNumber, Name, Description, StockDays, BasePrice, SupplierId, PartType,
-        PackagingUnit, QuantityPerPackage, GoodsCategoryId,
+        PackagingUnit, QuantityPerPackage, GoodsCategoryId, WeightGrams,
         ManufacturerName, SystemName, SystemSlug, ListPrice, ImageUrl, ImageAlt, Available,
         SupplierSlug, SupplierName, SupplierRating, SupplierReliability, SupplierAcceptsReturns);
 }
