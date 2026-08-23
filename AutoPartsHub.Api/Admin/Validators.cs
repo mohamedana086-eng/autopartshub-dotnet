@@ -253,7 +253,10 @@ public static class Validators
 
         return Ok(new ProductInput(
             partNumber, name, Optional(body, "description"), manufacturerId, vehicleSystemId,
-            Optional(body, "supplierId"), basePrice.Value, stockDays, partType));
+            Optional(body, "supplierId"), basePrice.Value, stockDays, partType,
+            // Blank means unclassified, which is a real answer: the part prices
+            // by the account default, as everything did before this existed.
+            Optional(body, "goodsCategoryId")));
     }
 
     /// <summary>
@@ -401,7 +404,9 @@ public record CurrencyInput(string Code, string Name, string Symbol, double Rate
 public record ProductInput(
     string PartNumber, string Name, string? Description, string ManufacturerId,
     string VehicleSystemId, string? SupplierId, double BasePrice, int? StockDays,
-    string PartType);
+    string PartType,
+    /// <summary>The commercial category the part is priced through, or null.</summary>
+    string? GoodsCategoryId);
 
 /// <summary>
 /// The three kinds a part can be.

@@ -261,10 +261,12 @@ public static class AdminPricingWriteEndpoints
             var id = Ids.New();
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "MarkupRule" ("id", "label", "priority", "clientCategoryId", "supplierId",
+                                          "goodsCategoryId",
                                           "manufacturerName", "vehicleSystemSlug", "partNumberPrefix",
                                           "purchasePriceFrom", "purchasePriceTo", "type", "value")
                 VALUES ({id}, {label}, {(int)(OptNum("priority") ?? 0)}, {OptText("clientCategoryId")},
-                        {OptText("supplierId")}, {OptText("manufacturerName")},
+                        {OptText("supplierId")}, {OptText("goodsCategoryId")},
+                        {OptText("manufacturerName")},
                         {OptText("vehicleSystemSlug")}, {OptText("partNumberPrefix")},
                         {from}, {to}, {type}, {value})
                 """, ct);
@@ -333,6 +335,7 @@ public static class AdminPricingWriteEndpoints
             SELECT r."id" AS "Id", r."label" AS "Label", r."priority" AS "Priority",
                    r."clientCategoryId" AS "ClientCategoryId", cc."name" AS "ClientCategoryName",
                    r."supplierId" AS "SupplierId", s."name" AS "SupplierName",
+                   r."goodsCategoryId" AS "GoodsCategoryId", g."name" AS "GoodsCategoryName",
                    r."manufacturerName" AS "ManufacturerName",
                    r."vehicleSystemSlug" AS "VehicleSystemSlug",
                    r."partNumberPrefix" AS "PartNumberPrefix",
@@ -342,6 +345,7 @@ public static class AdminPricingWriteEndpoints
             FROM "MarkupRule" r
             LEFT JOIN "ClientCategory" cc ON cc."id" = r."clientCategoryId"
             LEFT JOIN "Supplier" s ON s."id" = r."supplierId"
+            LEFT JOIN "GoodsCategory" g ON g."id" = r."goodsCategoryId"
             WHERE r."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 }

@@ -44,6 +44,8 @@ public static class AdminCatalogueWriteEndpoints
                        p."description" AS "Description", p."basePrice" AS "BasePrice",
                        p."stockDays" AS "StockDays",
                        p."partType" AS "PartType",
+                       p."goodsCategoryId" AS "GoodsCategoryId",
+                       g."name" AS "GoodsCategoryName",
                        p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                        p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                        p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
@@ -55,6 +57,7 @@ public static class AdminCatalogueWriteEndpoints
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
                 LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+                LEFT JOIN "GoodsCategory" g ON g."id" = p."goodsCategoryId"
                 LEFT JOIN LATERAL (
                   SELECT pi."url" FROM "ProductImage" pi
                   WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
@@ -91,7 +94,16 @@ public static class AdminCatalogueWriteEndpoints
                 .Select(w => new { id = w.Id, name = w.Code + " — " + w.Name })
                 .AsNoTracking().ToListAsync(ct);
 
-            return Results.Ok(new { products, manufacturers, systems, suppliers, warehouses });
+            // Active only. A switched-off category still holds its parts and
+            // still prices nothing, but offering it in a dropdown would invite
+            // filing a new part into a category the shop has retired.
+            var goodsCategories = await db.Database.SqlQuery<NamedRow>($"""
+                SELECT "id" AS "Id", "name" AS "Name" FROM "GoodsCategory"
+                WHERE "active" ORDER BY "sortOrder" ASC, "name" ASC
+                """).ToListAsync(ct);
+
+            return Results.Ok(new { products, manufacturers, systems, suppliers, warehouses,
+                goodsCategories = goodsCategories.Select(g => new { id = g.Id, name = g.Name }) });
         });
 
         app.MapPost("/api/admin/products", async (
@@ -124,10 +136,11 @@ public static class AdminCatalogueWriteEndpoints
             var id = Ids.New();
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "Product" ("id", "partNumber", "name", "description", "manufacturerId",
-                                       "vehicleSystemId", "supplierId", "basePrice", "stockDays", "partType")
+                                       "vehicleSystemId", "supplierId", "basePrice", "stockDays", "partType",
+                                       "goodsCategoryId")
                 VALUES ({id}, {p.PartNumber}, {p.Name}, {p.Description}, {p.ManufacturerId},
                         {p.VehicleSystemId}, {p.SupplierId}, {p.BasePrice}, {stockDays},
-                        {p.PartType})
+                        {p.PartType}, {p.GoodsCategoryId})
                 """, ct);
 
             return Results.Json(new { product = await ProductById(db, id, ct) }, statusCode: 201);
@@ -172,7 +185,8 @@ public static class AdminCatalogueWriteEndpoints
                        "description" = {p.Description}, "manufacturerId" = {p.ManufacturerId},
                        "vehicleSystemId" = {p.VehicleSystemId}, "supplierId" = {p.SupplierId},
                        "basePrice" = {p.BasePrice}, "stockDays" = {stockDays},
-                       "partType" = {p.PartType}
+                       "partType" = {p.PartType},
+                       "goodsCategoryId" = {p.GoodsCategoryId}
                  WHERE "id" = {id}
                 """, ct);
 
@@ -360,6 +374,8 @@ public static class AdminCatalogueWriteEndpoints
                    p."description" AS "Description", p."basePrice" AS "BasePrice",
                    p."stockDays" AS "StockDays",
                    p."partType" AS "PartType",
+                   p."goodsCategoryId" AS "GoodsCategoryId",
+                   g."name" AS "GoodsCategoryName",
                    p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                    p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                    p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
@@ -371,6 +387,7 @@ public static class AdminCatalogueWriteEndpoints
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
             JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
             LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+            LEFT JOIN "GoodsCategory" g ON g."id" = p."goodsCategoryId"
             LEFT JOIN LATERAL (
               SELECT pi."url" FROM "ProductImage" pi
               WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
@@ -432,5 +449,7 @@ public record AdminProductRow(
     string PartType,
     string ManufacturerId, string ManufacturerName, string VehicleSystemId, string SystemName,
     string? SupplierId, string? SupplierName,
+    /// <summary>The commercial category, and its name so the row can be read.</summary>
+    string? GoodsCategoryId, string? GoodsCategoryName,
     int InterchangeCount, int ImageCount, string? PrimaryImageUrl,
     int? StockOnHand, int? StockAvailable);

@@ -37,14 +37,16 @@ public class PricingEngineTests
         string? supplierId = null,
         string? manufacturerName = null,
         string? vehicleSystemSlug = null,
+        string? goodsCategoryId = null,
         string? partNumberPrefix = null,
         double? purchasePriceFrom = null,
         double? purchasePriceTo = null,
         MarkupType type = MarkupType.Percent,
         double value = 10,
         bool active = true) =>
-        new(id, label, priority, clientCategoryId, supplierId, manufacturerName,
-            vehicleSystemSlug, partNumberPrefix, purchasePriceFrom, purchasePriceTo,
+        new(id, label, priority, clientCategoryId, supplierId, goodsCategoryId,
+            manufacturerName, vehicleSystemSlug, partNumberPrefix,
+            purchasePriceFrom, purchasePriceTo,
             type, value, active);
 
     private const string Fallback = "Client category default markup";

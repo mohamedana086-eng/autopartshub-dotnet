@@ -129,6 +129,7 @@ public static class OrderEndpoints
                        p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                        p."packagingUnit" AS "PackagingUnit",
                        p."quantityPerPackage" AS "QuantityPerPackage",
+                       p."goodsCategoryId" AS "GoodsCategoryId",
                        m."name" AS "ManufacturerName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice"
                 FROM "Product" p
@@ -349,6 +350,8 @@ public record PriceableProductRow(
     string PackagingUnit,
     /// <summary>The step an order moves in. One means no constraint.</summary>
     int QuantityPerPackage,
+    /// <summary>The commercial category the part is priced through, or null.</summary>
+    string? GoodsCategoryId,
     string ManufacturerName,
     string SystemSlug,
     double? ListPrice) : IPriceable;

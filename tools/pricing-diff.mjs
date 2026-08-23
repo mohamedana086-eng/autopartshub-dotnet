@@ -60,6 +60,7 @@ const SUPPLIERS = ['sup-1', 'sup-2', 'sup-3'];
 const BRANDS = ['BOSCH', 'brembo', 'ATE', 'MAHLE'];
 const SYSTEMS = ['brakes', 'cooling-system', 'filter'];
 const PREFIXES = ['BP', 'bp-', '0 986', 'ZZ'];
+const GOODS = ['consumables', 'heavy', 'slow-moving'];
 const TYPES = ['PERCENT', 'AMOUNT', 'FIXED'];
 const CURRENCIES = [
   null,
@@ -76,6 +77,20 @@ const makeCtx = () => ({
   partNumber: pick(['BP-1234', 'bp-9', '0 986 424 815', 'ACP 34 000S']),
   clientCategoryId: pick(CATEGORIES),
   clientCategoryMarkupPercent: pick([0, 4, 23, 50, 65.65, 100]),
+  // The goods-category rung. Generated as a pair so all four states occur:
+  // no category at all, a category with no markup, and a category whose
+  // markup either does or does not have a rule above it. The ordering of the
+  // ladder is the part a port gets wrong, and it only shows when the rungs
+  // disagree — which is why the values below never coincide with the client
+  // category defaults above.
+  goodsCategoryId: maybe(pick(GOODS)) ?? undefined,
+  goodsCategoryMarkup: rnd() < 0.5
+    ? undefined
+    : {
+        label: pick(['Consumables', 'Heavy parts', 'Slow-moving']),
+        type: pick(TYPES),
+        value: pick([7, 42, 78, 95, 300, -50]),
+      },
   discountPercent: pick([undefined, 0, 7.5, 10, 33.333, 100, -5, 150]),
   currency: pick(CURRENCIES) ?? undefined,
 });
@@ -86,6 +101,7 @@ const makeRule = (i) => ({
   priority: pick([-1, 0, 3, 5, 10]),
   clientCategoryId: maybe(pick(CATEGORIES)),
   supplierId: maybe(pick(SUPPLIERS)),
+  goodsCategoryId: maybe(pick(GOODS)),
   manufacturerName: maybe(pick(BRANDS)),
   vehicleSystemSlug: maybe(pick(SYSTEMS)),
   partNumberPrefix: maybe(pick(PREFIXES)),
@@ -97,6 +113,9 @@ const makeRule = (i) => ({
 });
 
 // The C# side takes the enum by name and the JSON is camelCased both ways.
+/** The C# enum takes its members by name; the JSON is camelCased both ways. */
+const NET_TYPE = { PERCENT: 'Percent', AMOUNT: 'Amount', FIXED: 'Fixed' };
+
 const forNet = (ctx, rules) => ({
   context: {
     basePrice: ctx.basePrice,
@@ -108,11 +127,15 @@ const forNet = (ctx, rules) => ({
     clientCategoryMarkupPercent: ctx.clientCategoryMarkupPercent,
     discountPercent: ctx.discountPercent ?? null,
     currency: ctx.currency ?? null,
+    goodsCategoryId: ctx.goodsCategoryId ?? null,
+    goodsCategoryMarkup: ctx.goodsCategoryMarkup
+      ? {
+          ...ctx.goodsCategoryMarkup,
+          type: NET_TYPE[ctx.goodsCategoryMarkup.type],
+        }
+      : null,
   },
-  rules: rules.map((r) => ({
-    ...r,
-    type: { PERCENT: 'Percent', AMOUNT: 'Amount', FIXED: 'Fixed' }[r.type],
-  })),
+  rules: rules.map((r) => ({ ...r, type: NET_TYPE[r.type] })),
 });
 
 const FIELDS = [

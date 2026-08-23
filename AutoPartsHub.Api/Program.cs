@@ -134,6 +134,7 @@ app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
 app.MapProductEndpoints();
 app.MapSearchEndpoints();
+app.MapGoodsCategoryEndpoints();
 app.MapCartEndpoints();
 app.MapNotificationEndpoints();
 app.MapOrderEndpoints();

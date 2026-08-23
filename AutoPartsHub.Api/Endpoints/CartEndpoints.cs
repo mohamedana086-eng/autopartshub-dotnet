@@ -202,6 +202,7 @@ public static class CartEndpoints
                    p."stockDays" AS "StockDays",
                    p."packagingUnit" AS "PackagingUnit",
                    p."quantityPerPackage" AS "QuantityPerPackage",
+                   p."goodsCategoryId" AS "GoodsCategoryId",
                    m."name" AS "ManufacturerName",
                    v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -298,4 +299,6 @@ public record BasketLineRow(
     /// <summary>What one package is called.</summary>
     string PackagingUnit,
     /// <summary>The step this line moves in. One means no constraint.</summary>
-    int QuantityPerPackage) : IPriceable;
+    int QuantityPerPackage,
+    /// <summary>The commercial category the part is priced through, or null.</summary>
+    string? GoodsCategoryId) : IPriceable;
