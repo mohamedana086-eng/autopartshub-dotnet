@@ -213,7 +213,7 @@ public static class CartEndpoints
                    p."packagingUnit" AS "PackagingUnit",
                    p."quantityPerPackage" AS "QuantityPerPackage",
                    p."goodsCategoryId" AS "GoodsCategoryId",
-                   p."weightGrams" AS "WeightGrams",
+                   p."weightGrams" AS "WeightGrams", p."partType" AS "PartType",
                    m."name" AS "ManufacturerName",
                    v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
@@ -314,4 +314,6 @@ public record BasketLineRow(
     /// <summary>The commercial category the part is priced through, or null.</summary>
     string? GoodsCategoryId,
     /// <summary>Per piece, in grams. Null where nobody has weighed the part.</summary>
-    int? WeightGrams) : IPriceable;
+    int? WeightGrams,
+    /// <summary>oem | aftermarket | substitute, for the "part type" dimension.</summary>
+    string PartType) : IPriceable;

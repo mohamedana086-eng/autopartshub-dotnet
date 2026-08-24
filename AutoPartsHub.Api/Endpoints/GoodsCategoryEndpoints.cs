@@ -1,3 +1,4 @@
+using AutoPartsHub.Api.Admin;
 using System.Text.Json;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Auth;
@@ -49,9 +50,11 @@ public static class GoodsCategoryEndpoints
             var id = Ids.New();
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "GoodsCategory" ("id", "name", "slug", "description",
-                                             "markupType", "markupValue", "sortOrder", "active")
+                                             "markupType", "markupValue", "markupMinAmount",
+                                             "sortOrder", "active")
                 VALUES ({id}, {value.Name}, {value.Slug}, {value.Description},
-                        {value.MarkupType}, {value.MarkupValue}, {value.SortOrder}, {value.Active})
+                        {value.MarkupType}, {value.MarkupValue}, {value.MarkupMinAmount},
+                        {value.SortOrder}, {value.Active})
                 """, ct);
 
             return Results.Json(
@@ -84,6 +87,7 @@ public static class GoodsCategoryEndpoints
                        "description" = {value.Description},
                        "markupType" = {value.MarkupType},
                        "markupValue" = {value.MarkupValue},
+                       "markupMinAmount" = {value.MarkupMinAmount},
                        "sortOrder" = {value.SortOrder},
                        "active" = {value.Active}
                  WHERE "id" = {id}
@@ -108,6 +112,12 @@ public static class GoodsCategoryEndpoints
             var existing = (await ListAsync(db, id, ct)).FirstOrDefault();
             if (existing is null) return Results.NotFound(new { error = "No such category." });
 
+            // Rules scoped to it widen by having the condition swept — a
+            // condition value is plain text with no key behind it, so nothing
+            // would have swept it otherwise and the rule would have gone on
+            // asking for a category that no longer exists.
+            var widened = await MarkupRules.ForgetValue(db, "goodsCategory", id, ct);
+
             await db.Database.ExecuteSqlAsync(
                 $"""DELETE FROM "GoodsCategory" WHERE "id" = {id}""", ct);
 
@@ -115,7 +125,7 @@ public static class GoodsCategoryEndpoints
             {
                 removed = existing.Name,
                 unclassified = existing.ProductCount,
-                widenedRules = existing.RuleCount,
+                widenedRules = widened,
             });
         });
     }
@@ -151,6 +161,7 @@ public static class GoodsCategoryEndpoints
             SELECT g."id" AS "Id", g."name" AS "Name", g."slug" AS "Slug",
                    g."description" AS "Description",
                    g."markupType" AS "MarkupType", g."markupValue" AS "MarkupValue",
+                   g."markupMinAmount" AS "MarkupMinAmount",
                    g."sortOrder" AS "SortOrder", g."active" AS "Active",
                    -- Counted in the query rather than by loading the parts.
                    -- The list wants the number, not the rows behind it.
@@ -161,7 +172,8 @@ public static class GoodsCategoryEndpoints
               SELECT COUNT(*) AS n FROM "Product" WHERE "goodsCategoryId" = g."id"
             ) p ON true
             LEFT JOIN LATERAL (
-              SELECT COUNT(*) AS n FROM "MarkupRule" WHERE "goodsCategoryId" = g."id"
+              SELECT COUNT(*) AS n FROM "MarkupRuleCondition"
+               WHERE "dimension" = 'goodsCategory' AND "value" = g."id"
             ) r ON true
             WHERE ({id}::text IS NULL OR g."id" = {id})
             ORDER BY g."sortOrder" ASC, g."name" ASC
@@ -177,6 +189,7 @@ public record GoodsCategoryRow(
     string? Description,
     string? MarkupType,
     double? MarkupValue,
+    double? MarkupMinAmount,
     int SortOrder,
     bool Active,
     /// <summary>How many parts are in it — whether it is worth having.</summary>

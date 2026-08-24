@@ -144,7 +144,7 @@ public static class OrderEndpoints
                        p."packagingUnit" AS "PackagingUnit",
                        p."quantityPerPackage" AS "QuantityPerPackage",
                        p."goodsCategoryId" AS "GoodsCategoryId",
-                       p."weightGrams" AS "WeightGrams",
+                       p."weightGrams" AS "WeightGrams", p."partType" AS "PartType",
                        m."name" AS "ManufacturerName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice"
                 FROM "Product" p
@@ -378,6 +378,8 @@ public record PriceableProductRow(
     string? GoodsCategoryId,
     /// <summary>Per piece, in grams. Null where nobody has weighed the part.</summary>
     int? WeightGrams,
+    /// <summary>oem | aftermarket | substitute, for the "part type" dimension.</summary>
+    string PartType,
     string ManufacturerName,
     string SystemSlug,
     double? ListPrice) : IPriceable;

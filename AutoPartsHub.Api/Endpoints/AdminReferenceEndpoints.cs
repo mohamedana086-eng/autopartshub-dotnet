@@ -1,3 +1,4 @@
+using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
 using Microsoft.EntityFrameworkCore;
@@ -156,51 +157,27 @@ public static class AdminReferenceEndpoints
         });
 
         // GET /api/admin/markup-rules — rules plus everything the builder's
-        // selects need. Each rule names the tier and supplier it targets: the
-        // list is read to see which rule wins, and one that says only
-        // "category cm3x…" cannot be read at all.
+        // selects need.
+        //
+        // Rules come back most specific first, which is the order the engine
+        // ranks them in, so the list reads as "this is the one that applies".
+        // Each condition value carries a readable label beside it: one that
+        // said only "supplier = cms1a32bs…" could not be read at all.
         app.MapGet("/api/admin/markup-rules", async (
             HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
         {
             var g = gate.RequireAdmin(http);
             if (!g.Ok) return g.Response!;
 
-            var rules = await db.Database.SqlQuery<AdminMarkupRuleRow>($"""
-                SELECT r."id" AS "Id", r."label" AS "Label", r."priority" AS "Priority",
-                       r."clientCategoryId" AS "ClientCategoryId",
-                       cc."name" AS "ClientCategoryName",
-                       r."supplierId" AS "SupplierId", s."name" AS "SupplierName",
-                       r."goodsCategoryId" AS "GoodsCategoryId", g."name" AS "GoodsCategoryName",
-                       r."manufacturerName" AS "ManufacturerName",
-                       r."vehicleSystemSlug" AS "VehicleSystemSlug",
-                       r."partNumberPrefix" AS "PartNumberPrefix",
-                       r."purchasePriceFrom" AS "PurchasePriceFrom",
-                       r."purchasePriceTo" AS "PurchasePriceTo",
-                       r."type" AS "Type", r."value" AS "Value", r."active" AS "Active"
-                FROM "MarkupRule" r
-                LEFT JOIN "ClientCategory" cc ON cc."id" = r."clientCategoryId"
-                LEFT JOIN "Supplier" s ON s."id" = r."supplierId"
-                LEFT JOIN "GoodsCategory" g ON g."id" = r."goodsCategoryId"
-                ORDER BY r."priority" DESC
-                """).ToListAsync(ct);
+            var rules = await MarkupRules.Read(db, null, ct);
+            var options = await MarkupRules.Options(db, ct);
 
-            var categories = await db.ClientCategories.OrderBy(c => c.MarkupPercent)
-                .Select(c => new { id = c.Id, name = c.Name }).AsNoTracking().ToListAsync(ct);
-            var suppliers = await db.Suppliers
-                .Select(s => new { id = s.Id, name = s.Name }).AsNoTracking().ToListAsync(ct);
-            var systems = await db.VehicleSystems.OrderBy(v => v.Order)
-                .Select(v => new { slug = v.Slug, name = v.Name }).AsNoTracking().ToListAsync(ct);
-
-            // Active only. A switched-off category still holds its parts and
-            // still prices nothing, but offering it in a dropdown would invite
-            // filing a new part into a category the shop has retired.
-            var goodsCategories = await db.Database.SqlQuery<NamedRow>($"""
-                SELECT "id" AS "Id", "name" AS "Name" FROM "GoodsCategory"
-                WHERE "active" ORDER BY "sortOrder" ASC, "name" ASC
-                """).ToListAsync(ct);
-
-            return Results.Ok(new { rules, categories, suppliers, systems,
-                goodsCategories = goodsCategories.Select(g => new { id = g.Id, name = g.Name }) });
+            return Results.Ok(new
+            {
+                rules,
+                dimensions = ((dynamic)options).dimensions,
+                values = ((dynamic)options).values,
+            });
         });
 
         // GET /api/admin/price-lists — every list, active first then newest.
@@ -359,15 +336,6 @@ public record AdminCurrencyRow(
 
 public record AdminCategoryRow(
     string Id, string Name, double MarkupPercent, double MinOrderAmount, int ShelfLifeDays, int ClientCount);
-
-public record AdminMarkupRuleRow(
-    string Id, string Label, int Priority, string? ClientCategoryId, string? ClientCategoryName,
-    string? SupplierId, string? SupplierName,
-    /// <summary>The goods category this rule is narrowed to, and its name.</summary>
-    string? GoodsCategoryId, string? GoodsCategoryName,
-    string? ManufacturerName, string? VehicleSystemSlug,
-    string? PartNumberPrefix, double? PurchasePriceFrom, double? PurchasePriceTo,
-    string Type, double Value, bool Active);
 
 public record PriceListRow(
     string Id, string Name, string? Description, bool Active, string? SourceName,

@@ -15,6 +15,7 @@
 // that actually break in a port are rounding half-cases, ties broken the other
 // way, and numbers formatted differently inside the sentence a customer reads.
 import { resolvePrice } from '@/lib/pricing';
+import { specificityOf } from '@/lib/markup-dimensions';
 
 const BASE = 'http://localhost:5080';
 const NET = `${BASE}/dev/price`;
@@ -61,7 +62,49 @@ const BRANDS = ['BOSCH', 'brembo', 'ATE', 'MAHLE'];
 const SYSTEMS = ['brakes', 'cooling-system', 'filter'];
 const PREFIXES = ['BP', 'bp-', '0 986', 'ZZ'];
 const GOODS = ['consumables', 'heavy', 'slow-moving'];
-const TYPES = ['PERCENT', 'AMOUNT', 'FIXED'];
+const TYPES = ['PERCENT', 'AMOUNT', 'FIXED', 'PERCENT_MIN'];
+
+// Around the seasons, so a window sometimes covers "now" and sometimes does
+// not, and sometimes has only one bound. Fixed instants rather than offsets
+// from the real clock, so a failure can be re-run tomorrow and still fail.
+const JUNE = Date.UTC(2026, 5, 1);
+const JULY = Date.UTC(2026, 6, 1);
+const AUGUST = Date.UTC(2026, 7, 1);
+const MOMENTS = [JUNE, JULY, AUGUST];
+const PART_TYPES = ['oem', 'aftermarket', 'substitute'];
+const NAMES = ['Brake pad set, front', 'Oil filter', 'Radiator hose', 'CLUTCH KIT'];
+const WORDS = ['brake', 'FILTER', 'hose', 'pad set', 'zz'];
+const CLIENTS = ['cli-1', 'cli-2', 'cli-3'];
+const ROLES = ['RETAIL', 'B2B', 'SALES'];
+const MANAGERS = ['mgr-1', 'mgr-2'];
+const CITIES = ['Cairo', 'ALEXANDRIA', 'tanta'];
+const LISTS = ['pl-a', 'pl-b'];
+
+/**
+ * Every dimension a rule can narrow on, and values to draw from.
+ *
+ * The last entry is deliberately not a dimension either build knows. A rule
+ * carrying one has to stop applying on BOTH ports rather than applying on one
+ * of them — a rule written by a newer version of the software must not price
+ * differently depending on which API answered.
+ */
+const DIMENSIONS = [
+  ['supplier', SUPPLIERS],
+  ['manufacturer', BRANDS],
+  ['vehicleSystem', SYSTEMS],
+  ['goodsCategory', GOODS],
+  ['partType', PART_TYPES],
+  ['partNumberPrefix', PREFIXES],
+  ['nameContains', WORDS],
+  ['clientCategory', CATEGORIES],
+  ['client', CLIENTS],
+  ['clientRole', ROLES],
+  ['salesManager', MANAGERS],
+  ['city', CITIES],
+  ['currency', ['EUR', 'USD', 'EGP', 'GBP']],
+  ['priceList', LISTS],
+  ['deliveryTerms', ['ex-works', 'delivered']],
+];
 const CURRENCIES = [
   null,
   { code: 'EUR', symbol: '€', rate: 1 },
@@ -86,35 +129,108 @@ const makeCtx = () => ({
   goodsCategoryId: maybe(pick(GOODS)) ?? undefined,
   goodsCategoryMarkup: rnd() < 0.5
     ? undefined
-    : {
-        label: pick(['Consumables', 'Heavy parts', 'Slow-moving']),
-        type: pick(TYPES),
-        value: pick([7, 42, 78, 95, 300, -50]),
-      },
+    : (() => {
+        const type = pick(TYPES);
+        return {
+          label: pick(['Consumables', 'Heavy parts', 'Slow-moving']),
+          type,
+          value: pick([7, 42, 78, 95, 300, -50]),
+          // The floor belongs to exactly one type, the same way the database
+          // and both validators have it.
+          minAmount: type === 'PERCENT_MIN' ? pick([0, 0.5, 2, 25]) : null,
+        };
+      })(),
   discountPercent: pick([undefined, 0, 7.5, 10, 33.333, 100, -5, 150]),
   currency: pick(CURRENCIES) ?? undefined,
+  // Always set, so a windowed rule is asked about a definite moment rather
+  // than about whenever each port happened to read its clock.
+  now: pick(MOMENTS),
+  // The caller-side dimensions, and the two part-side ones added with them.
+  // Undefined as often as set, because "the request cannot answer" is a state
+  // the two ports have to agree about as much as any value is.
+  partName: maybe(pick(NAMES)) ?? undefined,
+  partType: maybe(pick(PART_TYPES)) ?? undefined,
+  clientId: maybe(pick(CLIENTS)) ?? undefined,
+  clientRole: maybe(pick(ROLES)) ?? undefined,
+  salesManagerId: maybe(pick(MANAGERS)) ?? undefined,
+  city: maybe(pick(CITIES)) ?? undefined,
+  priceListId: maybe(pick(LISTS)) ?? undefined,
 });
 
-const makeRule = (i) => ({
-  id: `r${i}`,
-  label: `Rule ${i}`,
-  priority: pick([-1, 0, 3, 5, 10]),
-  clientCategoryId: maybe(pick(CATEGORIES)),
-  supplierId: maybe(pick(SUPPLIERS)),
-  goodsCategoryId: maybe(pick(GOODS)),
-  manufacturerName: maybe(pick(BRANDS)),
-  vehicleSystemSlug: maybe(pick(SYSTEMS)),
-  partNumberPrefix: maybe(pick(PREFIXES)),
-  purchasePriceFrom: maybe(pick([0, 10, 50])),
-  purchasePriceTo: maybe(pick([10, 100, 5000])),
-  type: pick(TYPES),
-  value: pick([0, 2, 12, 18, 26, 99.99]),
-  active: rnd() < 0.85,
-});
+/**
+ * A rule's conditions: up to three dimensions, each holding up to three values.
+ *
+ * Lists of more than one are the point. A rule naming three suppliers has to
+ * match any of them and still rank where a rule naming one ranks, and a port
+ * that reads the rows flat would instead require all three at once — which
+ * nothing satisfies, so it would quietly never apply.
+ */
+const makeConditions = () => {
+  const chosen = new Set();
+  const conditions = [];
+
+  for (let i = 0, wanted = Math.floor(rnd() * 4); i < wanted; i++) {
+    const [name, values] = pick(DIMENSIONS);
+    if (chosen.has(name)) continue;
+    chosen.add(name);
+
+    // The group points one way or the other, never both — which is what the
+    // write path enforces, so it is what the engine should be compared on.
+    // An exclusion is a different question from a longer list, and the two
+    // ports have to answer it the same way.
+    const negated = rnd() < 0.3;
+
+    const many = new Set();
+    for (let j = 0, count = 1 + Math.floor(rnd() * 3); j < count; j++) {
+      many.add(pick(values));
+    }
+    for (const value of many) conditions.push({ dimension: name, value, negated });
+  }
+
+  return conditions;
+};
+
+/** A window: neither bound, one of them, or both — and sometimes backwards. */
+const makeWindow = () => {
+  const roll = rnd();
+  if (roll < 0.55) return { startsAtMs: null, endsAtMs: null };
+  if (roll < 0.7) return { startsAtMs: pick(MOMENTS), endsAtMs: null };
+  if (roll < 0.85) return { startsAtMs: null, endsAtMs: pick(MOMENTS) };
+  return { startsAtMs: JUNE, endsAtMs: pick([JUNE, JULY, AUGUST]) };
+};
+
+const makeRule = (i) => {
+  const conditions = makeConditions();
+  const from = maybe(pick([0, 10, 50]));
+  const to = maybe(pick([10, 100, 5000]));
+  const type = pick(TYPES);
+  const window = makeWindow();
+
+  return {
+    id: `r${i}`,
+    label: `Rule ${i}`,
+    priority: pick([-1, 0, 3, 5, 10]),
+    conditions,
+    // Computed once and sent to both, the way a save computes it once and
+    // stores it. The .NET probe recomputes it from the conditions it receives
+    // rather than trusting this number, so the two implementations of the
+    // arithmetic are compared here too.
+    specificity: specificityOf(conditions, from !== null || to !== null),
+    purchasePriceFrom: from,
+    purchasePriceTo: to,
+    type,
+    value: pick([0, 2, 12, 18, 26, 99.99]),
+    minAmount: type === 'PERCENT_MIN' ? pick([0, 0.5, 2, 25]) : null,
+    ...window,
+    active: rnd() < 0.85,
+  };
+};
 
 // The C# side takes the enum by name and the JSON is camelCased both ways.
 /** The C# enum takes its members by name; the JSON is camelCased both ways. */
-const NET_TYPE = { PERCENT: 'Percent', AMOUNT: 'Amount', FIXED: 'Fixed' };
+const NET_TYPE = {
+  PERCENT: 'Percent', AMOUNT: 'Amount', FIXED: 'Fixed', PERCENT_MIN: 'PercentMin',
+};
 
 const forNet = (ctx, rules) => ({
   context: {
@@ -128,6 +244,14 @@ const forNet = (ctx, rules) => ({
     discountPercent: ctx.discountPercent ?? null,
     currency: ctx.currency ?? null,
     goodsCategoryId: ctx.goodsCategoryId ?? null,
+    partName: ctx.partName ?? null,
+    partType: ctx.partType ?? null,
+    clientId: ctx.clientId ?? null,
+    clientRole: ctx.clientRole ?? null,
+    salesManagerId: ctx.salesManagerId ?? null,
+    city: ctx.city ?? null,
+    priceListId: ctx.priceListId ?? null,
+    nowMs: ctx.now,
     goodsCategoryMarkup: ctx.goodsCategoryMarkup
       ? {
           ...ctx.goodsCategoryMarkup,

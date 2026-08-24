@@ -30,6 +30,8 @@ public partial class AutoPartsContext : DbContext
 
     public virtual DbSet<MarkupRule> MarkupRules { get; set; }
 
+    public virtual DbSet<MarkupRuleCondition> MarkupRuleConditions { get; set; }
+
     public virtual DbSet<Notification> Notifications { get; set; }
 
     public virtual DbSet<Order> Orders { get; set; }
@@ -288,33 +290,54 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Active)
                 .HasDefaultValue(true)
                 .HasColumnName("active");
-            entity.Property(e => e.ClientCategoryId).HasColumnName("clientCategoryId");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
                 .HasColumnType("timestamp(3) without time zone")
                 .HasColumnName("createdAt");
             entity.Property(e => e.Label).HasColumnName("label");
-            entity.Property(e => e.ManufacturerName).HasColumnName("manufacturerName");
-            entity.Property(e => e.PartNumberPrefix).HasColumnName("partNumberPrefix");
             entity.Property(e => e.Priority).HasColumnName("priority");
+            entity.Property(e => e.Specificity)
+                .HasDefaultValue(0)
+                .HasColumnName("specificity");
             entity.Property(e => e.PurchasePriceFrom).HasColumnName("purchasePriceFrom");
             entity.Property(e => e.PurchasePriceTo).HasColumnName("purchasePriceTo");
-            entity.Property(e => e.SupplierId).HasColumnName("supplierId");
             entity.Property(e => e.Type)
                 .HasDefaultValueSql("'PERCENT'::text")
                 .HasColumnName("type");
             entity.Property(e => e.Value).HasColumnName("value");
-            entity.Property(e => e.VehicleSystemSlug).HasColumnName("vehicleSystemSlug");
+            entity.Property(e => e.MinAmount).HasColumnName("minAmount");
+            entity.Property(e => e.StartsAt)
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("startsAt");
+            entity.Property(e => e.EndsAt)
+                .HasColumnType("timestamp(3) without time zone")
+                .HasColumnName("endsAt");
+        });
 
-            entity.HasOne(d => d.ClientCategory).WithMany(p => p.MarkupRules)
-                .HasForeignKey(d => d.ClientCategoryId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("MarkupRule_clientCategoryId_fkey");
+        modelBuilder.Entity<MarkupRuleCondition>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("MarkupRuleCondition_pkey");
 
-            entity.HasOne(d => d.Supplier).WithMany(p => p.MarkupRules)
-                .HasForeignKey(d => d.SupplierId)
-                .OnDelete(DeleteBehavior.SetNull)
-                .HasConstraintName("MarkupRule_supplierId_fkey");
+            entity.ToTable("MarkupRuleCondition");
+
+            entity.HasIndex(e => new { e.RuleId, e.Dimension, e.Value })
+                .IsUnique()
+                .HasDatabaseName("MarkupRuleCondition_ruleId_dimension_value_key");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.RuleId).HasColumnName("ruleId");
+            entity.Property(e => e.Dimension).HasColumnName("dimension");
+            entity.Property(e => e.Value).HasColumnName("value");
+            entity.Property(e => e.Negated)
+                .HasDefaultValue(false)
+                .HasColumnName("negated");
+
+            // A rule's conditions are the rule. Rows left behind would go on
+            // ranking against rules created later.
+            entity.HasOne(d => d.Rule).WithMany(p => p.Conditions)
+                .HasForeignKey(d => d.RuleId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("MarkupRuleCondition_ruleId_fkey");
         });
 
         modelBuilder.Entity<Notification>(entity =>

@@ -80,7 +80,7 @@ public static class BulkLookupEndpoints
                        p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
                        p."stockDays" AS "StockDays",
                        p."goodsCategoryId" AS "GoodsCategoryId",
-                       p."weightGrams" AS "WeightGrams",
+                       p."weightGrams" AS "WeightGrams", p."partType" AS "PartType",
                        m."name" AS "ManufacturerName",
                        v."name" AS "SystemName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice",
@@ -196,6 +196,6 @@ public record InterchangeMatch(string Id, string Norm, string Target);
 
 public record BulkRow(
     string Id, string PartNumber, string Name, double BasePrice, string? SupplierId,
-    int StockDays, string? GoodsCategoryId, int? WeightGrams,
+    int StockDays, string? GoodsCategoryId, int? WeightGrams, string PartType,
     string ManufacturerName, string SystemName, string SystemSlug,
     double? ListPrice, int? Available) : IPriceable;

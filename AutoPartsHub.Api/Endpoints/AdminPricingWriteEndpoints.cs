@@ -124,6 +124,13 @@ public static class AdminPricingWriteEndpoints
                 }, statusCode: 409);
             }
 
+            // Conditions name a currency by its CODE, because that is what a
+            // request knows it is being quoted in — so the code has to be read
+            // before the row holding it goes.
+            var code = await db.Currencies.Where(c => c.Id == id).Select(c => c.Code)
+                .FirstOrDefaultAsync(ct);
+            if (code is not null) await MarkupRules.ForgetValue(db, "currency", code, ct);
+
             // Past orders keep their own copy of the code and rate, so deleting
             // a currency no account uses cannot disturb order history.
             await db.Database.ExecuteSqlAsync($"""DELETE FROM "Currency" WHERE "id" = {id}""", ct);
@@ -184,9 +191,12 @@ public static class AdminPricingWriteEndpoints
                 .FirstOrDefaultAsync(ct);
             if (name is null) return Results.NotFound(new { error = "Category not found." });
 
-            // Client.categoryId and MarkupRule.clientCategoryId both reference
-            // this row, so deleting it out from under them fails at the
-            // database. Say why instead of surfacing a foreign-key error.
+            // Client.categoryId references this row, so deleting it out from
+            // under a client fails at the database — say why instead of
+            // surfacing a foreign-key error. A pricing-tier condition on a
+            // markup rule has no key to fail on at all, which is the better
+            // reason to check it: the rule would silently go on naming a tier
+            // that no longer exists.
             var clients = await db.Clients.CountAsync(c => c.CategoryId == id, ct);
             if (clients > 0)
             {
@@ -197,7 +207,8 @@ public static class AdminPricingWriteEndpoints
                 }, statusCode: 409);
             }
 
-            var rules = await db.MarkupRules.CountAsync(r => r.ClientCategoryId == id, ct);
+            var rules = await db.MarkupRuleConditions
+                .CountAsync(c => c.Dimension == "clientCategory" && c.Value == id, ct);
             if (rules > 0)
             {
                 return Results.Json(new
@@ -219,59 +230,39 @@ public static class AdminPricingWriteEndpoints
             var g = gate.RequireAdmin(http);
             if (!g.Ok) return g.Response!;
 
-            var label = JsonValues.AsString(JsonValues.Get(body, "label")).Trim();
-            if (label.Length == 0) return Results.BadRequest(new { error = "Label is required." });
+            var (rule, error) = MarkupRules.ParseBody(body);
+            if (error is not null) return Results.BadRequest(new { error });
 
-            var type = JsonValues.Get(body, "type") is { } t
-                ? JsonValues.AsString(t) : "PERCENT";
-            if (type.Length == 0) type = "PERCENT";
-            if (type is not ("PERCENT" or "AMOUNT" or "FIXED"))
+            var id = await MarkupRules.Create(db, rule!, ct);
+
+            return Results.Json(
+                new { rule = await MarkupRules.ById(db, id, ct) }, statusCode: 201);
+        });
+
+        // PUT /api/admin/markup-rules/<id> — the whole rule, conditions and all.
+        //
+        // A rewrite rather than a patch because the conditions are a set:
+        // sending "these two suppliers" has to be able to mean the rule now
+        // names two and no longer names the third, and a merge could not say
+        // that.
+        app.MapPut("/api/admin/markup-rules/{id}", async (
+            string id, JsonElement body, HttpContext http, AdminGate gate,
+            AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var (rule, error) = MarkupRules.ParseBody(body);
+            if (error is not null) return Results.BadRequest(new { error });
+
+            if (!await db.MarkupRules.AnyAsync(r => r.Id == id, ct))
             {
-                return Results.BadRequest(
-                    new { error = "Adjustment type must be PERCENT, AMOUNT or FIXED." });
+                return Results.NotFound(new { error = "Rule not found." });
             }
 
-            var value = JsonValues.AsNumber(JsonValues.Get(body, "value")) ?? double.NaN;
-            if (double.IsNaN(value) || double.IsInfinity(value))
-            {
-                return Results.BadRequest(new { error = "Value must be a number." });
-            }
+            await MarkupRules.Update(db, id, rule!, ct);
 
-            string? OptText(string key) =>
-                JsonValues.AsString(JsonValues.Get(body, key)).Trim() is { Length: > 0 } v ? v : null;
-            double? OptNum(string key)
-            {
-                var raw = JsonValues.Get(body, key);
-                if (raw is null || raw.Value.ValueKind is JsonValueKind.Null
-                    || (raw.Value.ValueKind == JsonValueKind.String && raw.Value.GetString()!.Length == 0))
-                {
-                    return null;
-                }
-                var n = JsonValues.AsNumber(raw);
-                return n is null || double.IsNaN(n.Value) || double.IsInfinity(n.Value) ? null : n;
-            }
-
-            var from = OptNum("purchasePriceFrom");
-            var to = OptNum("purchasePriceTo");
-            if (from is not null && to is not null && from > to)
-            {
-                return Results.BadRequest(new { error = "Price band starts above where it ends." });
-            }
-
-            var id = Ids.New();
-            await db.Database.ExecuteSqlAsync($"""
-                INSERT INTO "MarkupRule" ("id", "label", "priority", "clientCategoryId", "supplierId",
-                                          "goodsCategoryId",
-                                          "manufacturerName", "vehicleSystemSlug", "partNumberPrefix",
-                                          "purchasePriceFrom", "purchasePriceTo", "type", "value")
-                VALUES ({id}, {label}, {(int)(OptNum("priority") ?? 0)}, {OptText("clientCategoryId")},
-                        {OptText("supplierId")}, {OptText("goodsCategoryId")},
-                        {OptText("manufacturerName")},
-                        {OptText("vehicleSystemSlug")}, {OptText("partNumberPrefix")},
-                        {from}, {to}, {type}, {value})
-                """, ct);
-
-            return Results.Json(new { rule = await MarkupRuleById(db, id, ct) }, statusCode: 201);
+            return Results.Ok(new { rule = await MarkupRules.ById(db, id, ct) });
         });
 
         // PATCH /api/admin/markup-rules/<id> { active }
@@ -329,23 +320,4 @@ public static class AdminPricingWriteEndpoints
             WHERE c."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 
-    private static async Task<AdminMarkupRuleRow?> MarkupRuleById(
-        AutoPartsContext db, string id, CancellationToken ct) =>
-        (await db.Database.SqlQuery<AdminMarkupRuleRow>($"""
-            SELECT r."id" AS "Id", r."label" AS "Label", r."priority" AS "Priority",
-                   r."clientCategoryId" AS "ClientCategoryId", cc."name" AS "ClientCategoryName",
-                   r."supplierId" AS "SupplierId", s."name" AS "SupplierName",
-                   r."goodsCategoryId" AS "GoodsCategoryId", g."name" AS "GoodsCategoryName",
-                   r."manufacturerName" AS "ManufacturerName",
-                   r."vehicleSystemSlug" AS "VehicleSystemSlug",
-                   r."partNumberPrefix" AS "PartNumberPrefix",
-                   r."purchasePriceFrom" AS "PurchasePriceFrom",
-                   r."purchasePriceTo" AS "PurchasePriceTo",
-                   r."type" AS "Type", r."value" AS "Value", r."active" AS "Active"
-            FROM "MarkupRule" r
-            LEFT JOIN "ClientCategory" cc ON cc."id" = r."clientCategoryId"
-            LEFT JOIN "Supplier" s ON s."id" = r."supplierId"
-            LEFT JOIN "GoodsCategory" g ON g."id" = r."goodsCategoryId"
-            WHERE r."id" = {id}
-            """).ToListAsync(ct)).FirstOrDefault();
 }

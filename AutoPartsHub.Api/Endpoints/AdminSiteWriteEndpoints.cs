@@ -144,10 +144,10 @@ public static class AdminSiteWriteEndpoints
             var supplier = await SupplierById(db, id, ct);
             if (supplier is null) return Results.NotFound(new { error = "Supplier not found." });
 
-            // Product.supplierId and MarkupRule.supplierId both point here, and
-            // both are ON DELETE SET NULL — so the database would allow this
-            // and quietly unsource the parts and change what they cost.
-            // Nothing stops it but this check.
+            // Product.supplierId is ON DELETE SET NULL, and a supplier
+            // condition on a markup rule has no foreign key at all — so the
+            // database would allow this, quietly unsource the parts and change
+            // what they cost. Nothing stops it but this check.
             var products = await db.Products.CountAsync(p => p.SupplierId == id, ct);
             if (products > 0)
             {
@@ -158,7 +158,8 @@ public static class AdminSiteWriteEndpoints
                 }, statusCode: 409);
             }
 
-            var rules = await db.MarkupRules.CountAsync(r => r.SupplierId == id, ct);
+            var rules = await db.MarkupRuleConditions
+                .CountAsync(c => c.Dimension == "supplier" && c.Value == id, ct);
             if (rules > 0)
             {
                 return Results.Json(new

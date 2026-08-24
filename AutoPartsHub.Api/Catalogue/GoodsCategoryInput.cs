@@ -65,6 +65,7 @@ public static partial class GoodsCategoryInput
 
         string? markupType = null;
         double? markupValue = null;
+        double? markupMinAmount = null;
 
         if (hasType)
         {
@@ -90,6 +91,32 @@ public static partial class GoodsCategoryInput
                 return (null, "A fixed price cannot be negative.");
             }
             markupValue = number;
+
+            // The floor belongs to exactly one type — set on any other it
+            // would do nothing, and missing on this one the type is a plain
+            // percentage under another name. The database enforces the same
+            // pair, both directions.
+            var rawFloor = JsonValues.Get(body, "markupMinAmount");
+            var hasFloor = HasContent(rawFloor);
+
+            if (markupType == "PERCENT_MIN")
+            {
+                if (!hasFloor)
+                {
+                    return (null, "A percentage with a floor needs the floor. Set a minimum amount.");
+                }
+                var floor = JsonValues.AsNumber(rawFloor);
+                if (floor is null) return (null, "The minimum amount must be a number.");
+                if (floor < 0)
+                {
+                    return (null, "A floor below nothing is a floor that never applies.");
+                }
+                markupMinAmount = floor;
+            }
+            else if (hasFloor)
+            {
+                return (null, "A minimum amount only applies to a percentage with a floor.");
+            }
         }
 
         var sortOrder = (int)(JsonValues.AsNumber(JsonValues.Get(body, "sortOrder")) ?? 0);
@@ -100,6 +127,7 @@ public static partial class GoodsCategoryInput
             Description: description.Length > 0 ? description : null,
             MarkupType: markupType,
             MarkupValue: markupValue,
+            MarkupMinAmount: markupMinAmount,
             SortOrder: sortOrder,
             // Absent means on. A category created switched off is a category
             // nobody meant to create.
@@ -119,20 +147,23 @@ public record GoodsCategoryValues(
     string? Description,
     string? MarkupType,
     double? MarkupValue,
+    /// <summary>The floor under PERCENT_MIN, and null on every other type.</summary>
+    double? MarkupMinAmount,
     int SortOrder,
     bool Active);
 
 /// <summary>
-/// The three kinds of markup, as the database stores them.
+/// The kinds of markup, as the database stores them.
 /// </summary>
 /// <remarks>
 /// Exported because the validator, the category form and the database's own
 /// check constraint all have to agree, and three copies of a vocabulary drift
-/// the day somebody adds a fourth.
+/// the day somebody adds a fourth. PERCENT_MIN is that fourth, and they did
+/// not drift.
 /// </remarks>
 public static class MarkupTypes
 {
-    public static readonly string[] All = ["PERCENT", "AMOUNT", "FIXED"];
+    public static readonly string[] All = ["PERCENT", "AMOUNT", "FIXED", "PERCENT_MIN"];
 }
 
 /// <summary>An id and a name — what a dropdown is built from.</summary>
