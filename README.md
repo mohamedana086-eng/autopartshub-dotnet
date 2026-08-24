@@ -232,7 +232,7 @@ because the update and the stock movement are in the same transaction.
 
 | script | what it holds down |
 |---|---|
-| `tools/compare.mjs` | 319 read requests, three sessions each, byte for byte |
+| `tools/compare.mjs` | 325 read requests, three sessions each, byte for byte |
 | `tools/search-snapshot.mjs` | 228 search responses against their own recorded past |
 | `tools/pricing-diff.mjs` | 400 generated pricing cases through both engines |
 | `tools/admin-writes.mjs` | 49 admin refusals and round trips |
