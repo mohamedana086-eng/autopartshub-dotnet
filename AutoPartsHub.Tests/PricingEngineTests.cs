@@ -29,6 +29,20 @@ public class PricingEngineTests
         new(basePrice, supplierId, manufacturerName, vehicleSystemSlug, partNumber,
             clientCategoryId, markupPercent, discountPercent, currency);
 
+    /// <summary>
+    /// A rule, named the way a rule used to be written.
+    /// </summary>
+    /// <remarks>
+    /// The filters are now conditions, and each of these named arguments makes
+    /// a list of one — which is what a single-value filter always was. Kept as
+    /// named arguments rather than rewritten at every call site because the
+    /// cases below are about what the engine DECIDES, and they should go on
+    /// deciding the same thing through the new mechanism. Lists longer than
+    /// one are exercised in <see cref="MarkupConditionTests"/>.
+    ///
+    /// Specificity comes from the same function a save uses, so a test cannot
+    /// drift from what ships.
+    /// </remarks>
     private static MarkupRule Rule(
         string id = "r1",
         string label = "Rule",
@@ -43,11 +57,22 @@ public class PricingEngineTests
         double? purchasePriceTo = null,
         MarkupType type = MarkupType.Percent,
         double value = 10,
-        bool active = true) =>
-        new(id, label, priority, clientCategoryId, supplierId, goodsCategoryId,
-            manufacturerName, vehicleSystemSlug, partNumberPrefix,
+        bool active = true)
+    {
+        List<RuleCondition> conditions = [];
+        if (clientCategoryId is not null) conditions.Add(new("clientCategory", clientCategoryId));
+        if (supplierId is not null) conditions.Add(new("supplier", supplierId));
+        if (manufacturerName is not null) conditions.Add(new("manufacturer", manufacturerName));
+        if (vehicleSystemSlug is not null) conditions.Add(new("vehicleSystem", vehicleSystemSlug));
+        if (goodsCategoryId is not null) conditions.Add(new("goodsCategory", goodsCategoryId));
+        if (partNumberPrefix is not null) conditions.Add(new("partNumberPrefix", partNumberPrefix));
+
+        return new(id, label, priority, conditions,
+            MarkupDimensions.SpecificityOf(
+                conditions, purchasePriceFrom is not null || purchasePriceTo is not null),
             purchasePriceFrom, purchasePriceTo,
             type, value, active);
+    }
 
     private const string Fallback = "Client category default markup";
 

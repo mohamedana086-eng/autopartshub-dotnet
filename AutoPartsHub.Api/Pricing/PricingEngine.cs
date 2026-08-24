@@ -11,12 +11,17 @@ namespace AutoPartsHub.Api.Pricing;
 ///     -> discount the account's negotiated percentage, off the marked-up price
 ///     -> currency converted into what the account is quoted in
 /// </code>
-/// Markup mirrors the "Complex markup" rule builder in the admin: a rule can
-/// filter on client category, supplier, manufacturer, vehicle system,
-/// part-number prefix, and a purchase-price band. Any filter left empty means
-/// "any". When several rules match, the MOST SPECIFIC one wins (most non-null
-/// filters), and <c>Priority</c> breaks ties. If no rule matches, the client's
-/// category default markup applies.
+/// Markup mirrors the "Complex markup" rule builder in the admin. A rule holds
+/// conditions, each naming a dimension and one acceptable value on it — see
+/// <see cref="MarkupDimensions"/>. Every dimension the rule mentions must be
+/// satisfied, and a dimension is satisfied by ANY of its values: "the supplier
+/// is among these three" is one condition to meet, not three. A rule with no
+/// conditions applies to everything.
+///
+/// When several rules match, the MOST SPECIFIC one wins — one point per
+/// dimension it narrows on, whatever the length of the list — and
+/// <c>Priority</c> breaks ties. If no rule matches, the client's category
+/// default markup applies.
 ///
 /// Discount is deliberately a separate step rather than another rule type.
 /// Inside the engine it would have had to either beat the markup or lose to
@@ -32,7 +37,25 @@ public static class PricingEngine
     /// <summary>The base currency, for accounts that are quoted in it.</summary>
     private static readonly PricingCurrency BaseCurrency = new("EUR", "€", 1);
 
-    private static double Round(double value) => Math.Round(value * 100, MidpointRounding.AwayFromZero) / 100;
+    /// <summary>
+    /// A number rounded the way JavaScript's <c>Math.round</c> rounds it.
+    /// </summary>
+    /// <remarks>
+    /// Not <c>MidpointRounding.AwayFromZero</c>, which is what this used to be.
+    /// The two agree on every positive midpoint and disagree on every negative
+    /// one: JavaScript rounds a half TOWARDS POSITIVE INFINITY, so -16.095
+    /// becomes -16.09, where away-from-zero makes it -16.10. A cent, on a
+    /// number that only appears when a markup or a margin comes out negative —
+    /// which is rare enough to have gone unnoticed and real enough to matter,
+    /// since the other API is the one serving customers and this one has to
+    /// agree with it rather than be independently defensible.
+    ///
+    /// Found by the four-hundred-case differential the day its inputs first
+    /// produced a negative midpoint.
+    /// </remarks>
+    private static double JsRound(double value) => Math.Floor(value + 0.5);
+
+    private static double Round(double value) => JsRound(value * 100) / 100;
 
     public static PriceResult Resolve(PricingContext ctx, IReadOnlyList<MarkupRule> rules)
     {
@@ -41,9 +64,14 @@ public static class PricingEngine
         // matters, so rules that tie on both keep the order they arrived in —
         // and they arrive ordered by id, which is what makes the answer the
         // same twice running.
+        // Read once, here, rather than inside the matcher — so the engine
+        // stays a pure function of what it is handed whenever a caller says
+        // what time it is, and still enforces a window when one does not.
+        var now = ctx.NowMs ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         var winner = rules
-            .Where(r => Matches(r, ctx))
-            .OrderByDescending(Specificity)
+            .Where(r => Matches(r, ctx, now))
+            .OrderByDescending(r => r.Specificity)
             .ThenByDescending(r => r.Priority)
             .FirstOrDefault();
 
@@ -65,9 +93,11 @@ public static class PricingEngine
         var categoryMarkup = ctx.GoodsCategoryMarkup;
 
         var markedUp = winner is not null
-            ? ApplyMarkup(ctx.BasePrice, winner.Type, winner.Value)
+            ? ApplyMarkup(ctx.BasePrice, winner.Type, winner.Value, winner.MinAmount)
             : categoryMarkup is not null
-                ? ApplyMarkup(ctx.BasePrice, categoryMarkup.Type, categoryMarkup.Value)
+                ? ApplyMarkup(
+                    ctx.BasePrice, categoryMarkup.Type, categoryMarkup.Value,
+                    categoryMarkup.MinAmount)
                 : ApplyMarkup(ctx.BasePrice, MarkupType.Percent, ctx.ClientCategoryMarkupPercent);
 
         // 2. Discount. Clamped to 0–100: a negative one would quietly become a
@@ -82,7 +112,7 @@ public static class PricingEngine
         // Margin stays a fact about the sale in the base currency: converting
         // it would leave the number unchanged but invite reading it as a rate.
         var marginPercent = ctx.BasePrice > 0
-            ? Math.Round(((Round(discounted) - ctx.BasePrice) / ctx.BasePrice) * 1000, MidpointRounding.AwayFromZero) / 10
+            ? JsRound(((Round(discounted) - ctx.BasePrice) / ctx.BasePrice) * 1000) / 10
             : 0;
 
         // Names the rung that decided, not just the number. A customer asking
@@ -120,64 +150,166 @@ public static class PricingEngine
     private static string Format(double value) =>
         value.ToString("0.############", System.Globalization.CultureInfo.InvariantCulture);
 
-    private static bool Matches(MarkupRule rule, PricingContext ctx)
+    /// <summary>
+    /// What the request can answer on one dimension.
+    /// </summary>
+    /// <remarks>
+    /// An unknown dimension answers null, which makes every condition on it
+    /// match nothing — so a rule written by a newer version of the software
+    /// stops applying rather than applying wrongly. That is the safe
+    /// direction: the account default catches it and the customer is quoted a
+    /// price somebody meant, rather than one nobody checked.
+    /// </remarks>
+    private static string? SubjectOf(string dimension, PricingContext ctx) => dimension switch
+    {
+        // the part
+        "supplier" => string.IsNullOrEmpty(ctx.SupplierId) ? null : ctx.SupplierId,
+        "manufacturer" => ctx.ManufacturerName,
+        "vehicleSystem" => ctx.VehicleSystemSlug,
+        "goodsCategory" => ctx.GoodsCategoryId,
+        "partType" => ctx.PartType,
+        "partNumberPrefix" => ctx.PartNumber,
+        "nameContains" => ctx.PartName,
+
+        // the caller
+        "clientCategory" => ctx.ClientCategoryId,
+        "client" => ctx.ClientId,
+        "clientRole" => ctx.ClientRole,
+        "salesManager" => ctx.SalesManagerId,
+        "city" => ctx.City,
+        "currency" => (ctx.Currency ?? BaseCurrency).Code,
+        "priceList" => ctx.PriceListId,
+
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether a rule applies: every dimension satisfied, by any of its values.
+    /// </summary>
+    /// <remarks>
+    /// Grouping first is the whole point. Conditions arrive flat — one row per
+    /// acceptable value — and read flat they would mean "the supplier is
+    /// sup-1 AND sup-2", which nothing could satisfy. Grouped they mean "the
+    /// supplier is among these", which is what somebody writing the rule
+    /// meant, and what makes a list of three rank where a list of one ranks.
+    /// </remarks>
+    private static bool Matches(MarkupRule rule, PricingContext ctx, long now)
     {
         if (!rule.Active) return false;
 
-        if (!string.IsNullOrEmpty(rule.ClientCategoryId) && rule.ClientCategoryId != ctx.ClientCategoryId) return false;
-        if (!string.IsNullOrEmpty(rule.SupplierId) && rule.SupplierId != ctx.SupplierId) return false;
-        // An unclassified part matches no category-scoped rule. Written
-        // against the rule's own value rather than the context's, so a part
-        // with no category falls through every one of them instead of
-        // matching the first.
-        if (!string.IsNullOrEmpty(rule.GoodsCategoryId) && rule.GoodsCategoryId != ctx.GoodsCategoryId) return false;
-        if (!string.IsNullOrEmpty(rule.ManufacturerName)
-            && !rule.ManufacturerName.Equals(ctx.ManufacturerName, StringComparison.OrdinalIgnoreCase)) return false;
-        if (!string.IsNullOrEmpty(rule.VehicleSystemSlug) && rule.VehicleSystemSlug != ctx.VehicleSystemSlug) return false;
-        if (!string.IsNullOrEmpty(rule.PartNumberPrefix)
-            && !ctx.PartNumber.StartsWith(rule.PartNumberPrefix, StringComparison.OrdinalIgnoreCase)) return false;
+        // Outside its window the rule does not exist. Deliberately separate
+        // from Active: that is somebody deciding, this decides on its own,
+        // which is the whole point of a seasonal price nobody has to remember
+        // to switch off.
+        if (rule.StartsAtMs is not null && now < rule.StartsAtMs) return false;
+        if (rule.EndsAtMs is not null && now > rule.EndsAtMs) return false;
+
         if (rule.PurchasePriceFrom is not null && ctx.BasePrice < rule.PurchasePriceFrom) return false;
         if (rule.PurchasePriceTo is not null && ctx.BasePrice > rule.PurchasePriceTo) return false;
+
+        // Grouped by dimension AND direction. Direction is part of the key
+        // rather than assumed uniform, so a dimension that somehow holds both
+        // an inclusion and an exclusion is still answered definitely — as two
+        // statements, both of which must hold — instead of depending on which
+        // row was read first. The write path refuses to store that; the engine
+        // does not get to assume the write path ran.
+        foreach (var group in rule.Conditions.GroupBy(
+                     c => (c.Dimension, c.Negated),
+                     ValueTupleComparer.Instance))
+        {
+            var dimension = MarkupDimensions.Find(group.Key.Dimension);
+            // A dimension this build does not know. Refusing to match is the
+            // safe direction, the same as an unanswerable subject.
+            if (dimension is null) return false;
+
+            var subject = SubjectOf(group.Key.Dimension, ctx);
+            // Neither direction is answerable when the request cannot say. A
+            // customer whose city nobody knows is not in Cairo, and is not
+            // outside Cairo either — the rule simply does not apply.
+            if (subject is null) return false;
+
+            var hit = group.Any(
+                c => MarkupDimensions.ValueMatches(dimension.Match, c.Value, subject));
+            if (hit == group.Key.Negated) return false;
+        }
 
         return true;
     }
 
-    private static int Specificity(MarkupRule rule) =>
-        (string.IsNullOrEmpty(rule.ClientCategoryId) ? 0 : 1)
-        + (string.IsNullOrEmpty(rule.SupplierId) ? 0 : 1)
-        + (string.IsNullOrEmpty(rule.GoodsCategoryId) ? 0 : 1)
-        + (string.IsNullOrEmpty(rule.ManufacturerName) ? 0 : 1)
-        + (string.IsNullOrEmpty(rule.VehicleSystemSlug) ? 0 : 1)
-        + (string.IsNullOrEmpty(rule.PartNumberPrefix) ? 0 : 1)
-        + (rule.PurchasePriceFrom is not null || rule.PurchasePriceTo is not null ? 1 : 0);
+    /// <summary>Ordinal on the name, exact on the direction.</summary>
+    private sealed class ValueTupleComparer : IEqualityComparer<(string Dimension, bool Negated)>
+    {
+        public static readonly ValueTupleComparer Instance = new();
 
-    private static double ApplyMarkup(double basePrice, MarkupType type, double value) => type switch
+        public bool Equals((string Dimension, bool Negated) a, (string Dimension, bool Negated) b) =>
+            a.Negated == b.Negated && string.Equals(a.Dimension, b.Dimension, StringComparison.Ordinal);
+
+        public int GetHashCode((string Dimension, bool Negated) key) =>
+            HashCode.Combine(StringComparer.Ordinal.GetHashCode(key.Dimension), key.Negated);
+    }
+
+    private static double ApplyMarkup(
+        double basePrice, MarkupType type, double value, double? minAmount = null) => type switch
     {
         MarkupType.Percent => basePrice * (1 + value / 100),
         MarkupType.Amount => basePrice + value,
         MarkupType.Fixed => value,
+        // The floor is on the markup, not on the price: it is a minimum
+        // profit, so a part that cost more still sells for more. Missing, it
+        // is nothing, which makes this behave as a plain percentage rather
+        // than as a surprise — the database refuses to store the pair so.
+        MarkupType.PercentMin => basePrice + Math.Max(basePrice * value / 100, minAmount ?? 0),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown markup type"),
     };
 }
 
-public enum MarkupType { Percent, Amount, Fixed }
+/// <param name="PercentMin">A percentage with a floor in money under it.</param>
+public enum MarkupType { Percent, Amount, Fixed, PercentMin }
 
+/// <param name="Conditions">
+/// What this rule narrows on. All the conditions sharing a dimension are ONE
+/// statement with several acceptable answers — "the supplier is among these" —
+/// so a rule naming three suppliers is exactly as specific as one naming a
+/// single supplier. Different dimensions must all be satisfied. Empty is a
+/// rule that applies to everything, which is a legitimate thing to write and
+/// the least specific rule there is.
+/// </param>
+/// <param name="Specificity">
+/// How many dimensions this narrows on, counted once each. Stored on the rule
+/// and recomputed whenever it is saved, rather than counted here per request —
+/// so the engine stays a pure function of its arguments, and the number a rule
+/// was ranked by is the number somebody can read off the row.
+/// </param>
 public record MarkupRule(
     string Id,
     string Label,
     int Priority,
-    string? ClientCategoryId,
-    string? SupplierId,
-    /// <summary>Narrows the rule to one goods category. Null is "any".</summary>
-    string? GoodsCategoryId,
-    string? ManufacturerName,
-    string? VehicleSystemSlug,
-    string? PartNumberPrefix,
+    IReadOnlyList<RuleCondition> Conditions,
+    int Specificity,
+    /// <summary>A range is one bound at each end, not a set to be among — so not a condition.</summary>
     double? PurchasePriceFrom,
     double? PurchasePriceTo,
     MarkupType Type,
     double Value,
-    bool Active);
+    bool Active,
+    /// <summary>
+    /// The floor under PercentMin, in the base currency. A minimum on the
+    /// markup rather than on the price — one percent of a one-euro part is a
+    /// cent, which does not pay for picking it off a shelf. Null on every
+    /// other type.
+    /// </summary>
+    double? MinAmount = null,
+    /// <summary>
+    /// When the rule is in force, as epoch milliseconds. Null at either end is
+    /// open — no end date means "until further notice", not "expired".
+    ///
+    /// Milliseconds rather than dates because the two ports have to agree to
+    /// the millisecond and neither timezone handling nor date parsing is the
+    /// same in both languages. The loaders convert; the engine compares
+    /// numbers.
+    /// </summary>
+    long? StartsAtMs = null,
+    long? EndsAtMs = null);
 
 /// <param name="BasePrice">Supplier purchase price, in the base currency.</param>
 /// <param name="ClientCategoryMarkupPercent">Fallback when no rule matches.</param>
@@ -195,6 +327,25 @@ public record PricingContext(
     PricingCurrency? Currency = null,
     /// <summary>The goods category this part is in, or null if unclassified.</summary>
     string? GoodsCategoryId = null,
+    /// <summary>The part's own name, for the "name contains" dimension.</summary>
+    string? PartName = null,
+    /// <summary>oem | aftermarket | substitute.</summary>
+    string? PartType = null,
+    /// <summary>Who is asking, for the dimensions that describe the caller rather than the part.</summary>
+    string? ClientId = null,
+    string? ClientRole = null,
+    string? SalesManagerId = null,
+    string? City = null,
+    /// <summary>The purchase price list in force, so a rule can apply only while it is.</summary>
+    string? PriceListId = null,
+    /// <summary>
+    /// Now, as epoch milliseconds, for rules that are only in force for a
+    /// while. Passed in so a window can be compared without the engine reading
+    /// a clock, which is what lets the same generated cases run through both
+    /// ports. Absent, it falls back to the real clock — a window nobody
+    /// enforces would be worse than a function reading one value from outside.
+    /// </summary>
+    long? NowMs = null,
     /// <summary>
     /// That category's own markup, already resolved by the caller.
     ///
@@ -213,7 +364,9 @@ public record PricingContext(
 /// always wins: it is the more specific statement of the two.
 /// </remarks>
 /// <param name="Label">Named in <c>AppliedRule</c>, so a quote can say which category decided.</param>
-public record GoodsCategoryMarkup(string Label, MarkupType Type, double Value);
+/// <param name="MinAmount">The floor under PercentMin. Null on every other type.</param>
+public record GoodsCategoryMarkup(
+    string Label, MarkupType Type, double Value, double? MinAmount = null);
 
 /// <summary>Enough of a Currency row to convert and label a price.</summary>
 /// <param name="Rate">Units of this currency per one unit of the base. 1 on the base.</param>

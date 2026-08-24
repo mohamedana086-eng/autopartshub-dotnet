@@ -23,7 +23,23 @@ public static class PricingProbeEndpoints
     public static void MapPricingProbe(this IEndpointRouteBuilder app)
     {
         app.MapPost("/dev/price", (PriceProbeRequest body) =>
-            Results.Ok(PricingEngine.Resolve(body.Context, body.Rules)));
+        {
+            // Specificity is recomputed here rather than taken from the body,
+            // which is what a save does. It also means the comparison covers
+            // both implementations of the arithmetic: if this port scored a
+            // list of three suppliers differently from the other, the ranking
+            // would change and the diff would show it as a different price.
+            var rules = body.Rules
+                .Select(r => r with
+                {
+                    Specificity = MarkupDimensions.SpecificityOf(
+                        r.Conditions,
+                        r.PurchasePriceFrom is not null || r.PurchasePriceTo is not null),
+                })
+                .ToList();
+
+            return Results.Ok(PricingEngine.Resolve(body.Context, rules));
+        });
     }
 }
 

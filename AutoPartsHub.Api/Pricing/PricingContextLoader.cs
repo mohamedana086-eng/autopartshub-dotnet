@@ -29,6 +29,10 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
 
         var account = (await db.Database.SqlQuery<AccountRow>($"""
             SELECT c."discountPercent" AS "DiscountPercent",
+                   -- Who is asking, for the dimensions that describe the caller
+                   -- rather than the part.
+                   c."id" AS "ClientId", c."role" AS "ClientRole",
+                   c."salesManagerId" AS "SalesManagerId", c."city" AS "City",
                    cat."id" AS "CategoryId",
                    cat."name" AS "CategoryName",
                    cat."markupPercent" AS "CategoryMarkupPercent",
@@ -52,33 +56,69 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         // and leaves a tie to input order. Heap order settled that before,
         // which is to say nothing settled it.
         // Raw SQL rather than LINQ over the entity: the scaffolded model does
-        // not carry goodsCategoryId, the same way it does not carry partType,
-        // and columns added since are read this way rather than by
-        // hand-editing something generated.
+        // not carry specificity, the same way it does not carry partType, and
+        // columns added since are read this way rather than by hand-editing
+        // something generated.
         var ruleRows = await db.Database.SqlQuery<MarkupRuleRow>($"""
             SELECT "id" AS "Id", "label" AS "Label", "priority" AS "Priority",
-                   "clientCategoryId" AS "ClientCategoryId", "supplierId" AS "SupplierId",
-                   "goodsCategoryId" AS "GoodsCategoryId",
-                   "manufacturerName" AS "ManufacturerName",
-                   "vehicleSystemSlug" AS "VehicleSystemSlug",
-                   "partNumberPrefix" AS "PartNumberPrefix",
+                   "specificity" AS "Specificity",
                    "purchasePriceFrom" AS "PurchasePriceFrom",
                    "purchasePriceTo" AS "PurchasePriceTo",
-                   "type" AS "Type", "value" AS "Value", "active" AS "Active"
+                   "type" AS "Type", "value" AS "Value", "active" AS "Active",
+                   "minAmount" AS "MinAmount",
+                   -- As epoch milliseconds, not as dates. The two ports have
+                   -- to agree on a window to the millisecond, and neither
+                   -- timezone handling nor date parsing is the same in both
+                   -- languages — whereas a number is a number. AT TIME ZONE
+                   -- 'UTC' pins down what a bare TIMESTAMP means rather than
+                   -- leaving it to the driver.
+                   (EXTRACT(EPOCH FROM "startsAt" AT TIME ZONE 'UTC') * 1000)::bigint
+                     AS "StartsAtMs",
+                   (EXTRACT(EPOCH FROM "endsAt" AT TIME ZONE 'UTC') * 1000)::bigint
+                     AS "EndsAtMs"
             FROM "MarkupRule"
             WHERE "active"
             ORDER BY "id" ASC
             """).ToListAsync(ct);
 
+        // Every condition on every active rule, in one read rather than one per
+        // rule. There are a few hundred at most and they are wanted together.
+        var conditionRows = await db.Database.SqlQuery<RuleConditionRow>($"""
+            SELECT c."ruleId" AS "RuleId", c."dimension" AS "Dimension", c."value" AS "Value",
+                   c."negated" AS "Negated"
+            FROM "MarkupRuleCondition" c
+            JOIN "MarkupRule" r ON r."id" = c."ruleId"
+            WHERE r."active"
+            ORDER BY c."ruleId" ASC, c."dimension" ASC, c."value" ASC
+            """).ToListAsync(ct);
+
+        // Grouped here rather than joined: a join would repeat every rule once
+        // per condition and have to be folded back together anyway.
+        var conditionsByRule = conditionRows
+            .GroupBy(c => c.RuleId, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<RuleCondition>)g
+                    .Select(c => new RuleCondition(c.Dimension, c.Value, c.Negated)).ToList(),
+                StringComparer.Ordinal);
+
         var rules = ruleRows
             .Select(r => new MarkupRule(
-                r.Id, r.Label, r.Priority, r.ClientCategoryId, r.SupplierId,
-                r.GoodsCategoryId,
-                r.ManufacturerName, r.VehicleSystemSlug, r.PartNumberPrefix,
+                r.Id, r.Label, r.Priority,
+                conditionsByRule.GetValueOrDefault(r.Id, []),
+                r.Specificity,
                 r.PurchasePriceFrom, r.PurchasePriceTo,
                 ReadMarkupType(r.Type),
-                r.Value, r.Active))
+                r.Value, r.Active,
+                r.MinAmount, r.StartsAtMs, r.EndsAtMs))
             .ToList();
+
+        // Which purchase price list is in force, so a rule can apply only while
+        // a particular one is. At most one is active, which the database
+        // enforces with a partial unique index.
+        var activeListId = (await db.Database.SqlQuery<string>($"""
+            SELECT "id" AS "Value" FROM "PriceList" WHERE "active" LIMIT 1
+            """).ToListAsync(ct)).FirstOrDefault();
 
         // The goods categories that price something, as a lookup rather than a
         // join on every priceable query.
@@ -92,14 +132,16 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         // one that is purely organisational, prices nothing.
         var categoryRows = await db.Database.SqlQuery<GoodsCategoryMarkupRow>($"""
             SELECT "id" AS "Id", "name" AS "Name",
-                   "markupType" AS "MarkupType", "markupValue" AS "MarkupValue"
+                   "markupType" AS "MarkupType", "markupValue" AS "MarkupValue",
+                   "markupMinAmount" AS "MarkupMinAmount"
             FROM "GoodsCategory"
             WHERE "active" AND "markupType" IS NOT NULL AND "markupValue" IS NOT NULL
             """).ToListAsync(ct);
 
         var goodsCategoryMarkups = categoryRows.ToDictionary(
             g => g.Id,
-            g => new GoodsCategoryMarkup(g.Name, ReadMarkupType(g.MarkupType), g.MarkupValue));
+            g => new GoodsCategoryMarkup(
+                g.Name, ReadMarkupType(g.MarkupType), g.MarkupValue, g.MarkupMinAmount));
 
         var currency = account is { CurrencyCode: not null, CurrencySymbol: not null, CurrencyRate: not null }
             ? new PricingCurrency(account.CurrencyCode, account.CurrencySymbol, account.CurrencyRate.Value)
@@ -113,7 +155,12 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             IsLoggedIn: session is not null,
             DiscountPercent: account?.DiscountPercent ?? 0,
             Currency: currency,
-            GoodsCategoryMarkups: goodsCategoryMarkups);
+            GoodsCategoryMarkups: goodsCategoryMarkups,
+            ClientId: account?.ClientId,
+            ClientRole: account?.ClientRole,
+            SalesManagerId: account?.SalesManagerId,
+            City: account?.City,
+            PriceListId: activeListId);
     }
 
     /// <summary>
@@ -129,21 +176,28 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
     {
         "AMOUNT" => MarkupType.Amount,
         "FIXED" => MarkupType.Fixed,
+        "PERCENT_MIN" => MarkupType.PercentMin,
         _ => MarkupType.Percent,
     };
 
     private record MarkupRuleRow(
-        string Id, string Label, int Priority,
-        string? ClientCategoryId, string? SupplierId, string? GoodsCategoryId,
-        string? ManufacturerName, string? VehicleSystemSlug, string? PartNumberPrefix,
+        string Id, string Label, int Priority, int Specificity,
         double? PurchasePriceFrom, double? PurchasePriceTo,
-        string Type, double Value, bool Active);
+        string Type, double Value, bool Active,
+        double? MinAmount, long? StartsAtMs, long? EndsAtMs);
+
+    private record RuleConditionRow(
+        string RuleId, string Dimension, string Value, bool Negated);
 
     private record GoodsCategoryMarkupRow(
-        string Id, string Name, string MarkupType, double MarkupValue);
+        string Id, string Name, string MarkupType, double MarkupValue, double? MarkupMinAmount);
 
     private record AccountRow(
         double? DiscountPercent,
+        string? ClientId,
+        string? ClientRole,
+        string? SalesManagerId,
+        string? City,
         string? CategoryId,
         string? CategoryName,
         double? CategoryMarkupPercent,
@@ -166,7 +220,14 @@ public record RequestPricing(
     /// A lookup rather than a join: the same handful of rows applies to every
     /// part in a response.
     /// </summary>
-    Dictionary<string, GoodsCategoryMarkup> GoodsCategoryMarkups)
+    Dictionary<string, GoodsCategoryMarkup> GoodsCategoryMarkups,
+    /// <summary>Who is asking, for the dimensions that describe the caller.</summary>
+    string? ClientId = null,
+    string? ClientRole = null,
+    string? SalesManagerId = null,
+    string? City = null,
+    /// <summary>The purchase price list in force, or null when none is.</summary>
+    string? PriceListId = null)
 {
     /// <summary>
     /// Prices one row, or null when there is no tier to price against — which
@@ -195,7 +256,17 @@ public record RequestPricing(
             // so both cases come out of it the same way.
             GoodsCategoryMarkup: row.GoodsCategoryId is null
                 ? null
-                : GoodsCategoryMarkups.GetValueOrDefault(row.GoodsCategoryId)), Rules);
+                : GoodsCategoryMarkups.GetValueOrDefault(row.GoodsCategoryId),
+            // The clock, read once per priced row rather than inside the
+            // engine, so the engine stays a pure function of what it is handed.
+            NowMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            PartName: row.Name,
+            PartType: row.PartType,
+            ClientId: ClientId,
+            ClientRole: ClientRole,
+            SalesManagerId: SalesManagerId,
+            City: City,
+            PriceListId: PriceListId), Rules);
     }
 
     /// <summary>
@@ -222,4 +293,10 @@ public interface IPriceable
     /// response.
     /// </summary>
     string? GoodsCategoryId { get; }
+
+    /// <summary>The part's own name, for the "name contains" dimension.</summary>
+    string Name { get; }
+
+    /// <summary>oem | aftermarket | substitute, for the "part type" dimension.</summary>
+    string PartType { get; }
 }

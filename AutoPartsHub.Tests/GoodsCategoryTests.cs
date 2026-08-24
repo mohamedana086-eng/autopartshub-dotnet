@@ -32,6 +32,7 @@ public class GoodsCategoryTests
             GoodsCategoryId: goodsCategoryId,
             GoodsCategoryMarkup: goodsCategoryMarkup);
 
+    /// <summary>A rule narrowing on a category, a supplier, or neither.</summary>
     private static MarkupRule Rule(
         string label,
         double value,
@@ -39,9 +40,16 @@ public class GoodsCategoryTests
         string? goodsCategoryId = null,
         string? supplierId = null,
         int priority = 0,
-        MarkupType type = MarkupType.Percent) =>
-        new(id, label, priority, null, supplierId, goodsCategoryId, null, null, null, null, null,
-            type, value, true);
+        MarkupType type = MarkupType.Percent)
+    {
+        List<RuleCondition> conditions = [];
+        if (goodsCategoryId is not null) conditions.Add(new("goodsCategory", goodsCategoryId));
+        if (supplierId is not null) conditions.Add(new("supplier", supplierId));
+
+        return new(id, label, priority, conditions,
+            MarkupDimensions.SpecificityOf(conditions, false),
+            null, null, type, value, true);
+    }
 
     [Fact]
     public void IsIgnoredWhenThePartHasNoCategory()

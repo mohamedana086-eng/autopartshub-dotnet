@@ -153,7 +153,11 @@ public static class AdminPriceListWriteEndpoints
                     statusCode: 409);
             }
 
-            // Its lines go with it: the cascade is on the foreign key.
+            // Its lines go with it: the cascade is on the foreign key. Its
+            // conditions do not — nothing points at a condition value — so they
+            // are swept by hand.
+            await MarkupRules.ForgetValue(db, "priceList", id, ct);
+
             await db.Database.ExecuteSqlAsync($"""DELETE FROM "PriceList" WHERE "id" = {id}""", ct);
 
             return Results.Ok(new { ok = true });

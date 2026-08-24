@@ -19,5 +19,4 @@ public partial class ClientCategory
 
     public virtual ICollection<Client> Clients { get; set; } = new List<Client>();
 
-    public virtual ICollection<MarkupRule> MarkupRules { get; set; } = new List<MarkupRule>();
 }
