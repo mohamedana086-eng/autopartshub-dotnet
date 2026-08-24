@@ -76,6 +76,14 @@ const GROUPS = {
     ['anonymous', '/api/suppliers'],
     ['anonymous', '/api/vehicles'],
     ['anonymous', '/api/vehicles/vin?vin=WBA3B1C50DF123456'],
+    // The spec finder, in the orders a customer actually uses it in — shape
+    // first with no make, and the impossible combination.
+    ['anonymous', '/api/vehicles/find'],
+    ['anonymous', '/api/vehicles/find?bodyType=estate'],
+    ['anonymous', '/api/vehicles/find?bodyType=estate&transmission=automatic'],
+    ['anonymous', '/api/vehicles/find?make=BMW&bodyType=pickup'],
+    ['anonymous', '/api/vehicles/find?make=BMW&bodyType=shooting-brake'],
+    ['anonymous', '/api/vehicles/find?year=2013&steeringSide=right'],
     ['anonymous', '/api/vehicles/vin?vin=ZZZ3B1C50DF123456'],
     ['anonymous', '/api/vehicles/vin?vin=nope'],
   ],

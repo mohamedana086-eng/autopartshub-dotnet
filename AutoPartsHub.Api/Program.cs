@@ -68,6 +68,7 @@ builder.Services.AddSingleton(new SessionTokens(
 builder.Services.AddScoped<PricingContextLoader>();
 builder.Services.AddScoped<SearchQueries>();
 builder.Services.AddScoped<SpecQueries>();
+builder.Services.AddScoped<AutoPartsHub.Api.Vehicles.VehicleFinder>();
 builder.Services.AddScoped<BarcodeQueries>();
 builder.Services.AddSingleton<AdminGate>();
 
@@ -135,6 +136,7 @@ app.MapAuthEndpoints();
 app.MapProductEndpoints();
 app.MapSearchEndpoints();
 app.MapGoodsCategoryEndpoints();
+app.MapVehicleFinderEndpoints();
 app.MapCartEndpoints();
 app.MapNotificationEndpoints();
 app.MapOrderEndpoints();
