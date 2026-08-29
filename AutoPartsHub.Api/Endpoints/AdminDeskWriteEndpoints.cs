@@ -101,11 +101,18 @@ public static class AdminDeskWriteEndpoints
         });
 
         // POST /api/admin/notifications — send one to an account.
+        //
+        // Open to SALES, narrowed to their own customers. Telling a customer
+        // their part is in is the same job as looking after that customer, and
+        // having to ask an admin to type it made the account a viewer with a
+        // title.
         app.MapPost("/api/admin/notifications", async (
             JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
         {
-            var g = gate.RequireAdmin(http);
+            var g = gate.RequireOperator(http);
             if (!g.Ok) return g.Response!;
+
+            var scope = g.ScopeTo;
 
             var clientId = JsonValues.AsString(JsonValues.Get(body, "clientId")).Trim();
             var title = JsonValues.AsString(JsonValues.Get(body, "title")).Trim();
@@ -138,18 +145,32 @@ public static class AdminDeskWriteEndpoints
                 });
             }
 
-            if (!await db.Clients.AnyAsync(c => c.Id == clientId, ct))
-            {
-                return Results.BadRequest(new { error = "Unknown account." });
-            }
-
             var id = Ids.New();
-            await db.Database.ExecuteSqlAsync($"""
+
+            // The recipient is checked by writing to them, not before writing
+            // to them. The id comes back from a list a browser sent, so "is
+            // this one of mine" and "write to this one" have to be the same
+            // statement — checked separately they are one forgotten return
+            // apart, and a reassignment in between would land the message with
+            // somebody else's customer.
+            //
+            // INSERT … SELECT is what makes that possible: no row to select
+            // means no row inserted.
+            var written = await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "Notification" ("id", "clientId", "type", "title", "body", "link")
-                VALUES ({id}, {clientId}, {type}, {title},
-                        {(messageBody.Length > 0 ? messageBody : null)},
-                        {(link.Length > 0 ? link : null)})
+                SELECT {id}, c."id", {type}, {title},
+                       {(messageBody.Length > 0 ? messageBody : null)},
+                       {(link.Length > 0 ? link : null)}
+                FROM "Client" c
+                WHERE c."id" = {clientId}
+                  AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
                 """, ct);
+
+            // Nothing written: the account does not exist, or is not one of
+            // this salesperson's. Both answer the same way — to them another
+            // manager's customer does not exist, and a distinct refusal would
+            // turn this endpoint into a way to enumerate the customer list.
+            if (written == 0) return Results.BadRequest(new { error = "Unknown account." });
 
             var n = (await db.Database.SqlQuery<AdminNotificationRow>($"""
                 SELECT n."id" AS "Id", n."clientId" AS "ClientId", c."name" AS "ClientName",

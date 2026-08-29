@@ -100,13 +100,21 @@ public static class CartEndpoints
                        p."packagingUnit" AS "PackagingUnit",
                        p."quantityPerPackage" AS "QuantityPerPackage"
                 FROM "Product" p
+                LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
                 WHERE p."id" = ANY({ids}::text[])
                 -- "Still in the catalogue" includes whether anyone is selling
                 -- it. A part behind a switched-off supplier is refused on the
                 -- way into a basket, which is the earliest place to say no.
-                AND (p."supplierId" IS NULL OR EXISTS (
-                  SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
-                ))
+                -- A part stays sellable while somebody will actually sell it to us: a live
+                -- offer from a live supplier, or no supplier relationship at all. What goes
+                -- is a part whose every supplier is switched off or whose every offer has
+                -- been withdrawn.
+                AND (
+                  bo."productId" IS NOT NULL
+                  OR (p."supplierId" IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+                  ))
+                )
                 """).ToListAsync(ct);
 
             // Refused on the way into the basket rather than at checkout.
@@ -217,12 +225,15 @@ public static class CartEndpoints
                    m."name" AS "ManufacturerName",
                    v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
+                   pli."markupPercent" AS "ListRowMarkupPercent",
+                   bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    st."available" AS "Available"
             FROM "CartItem" ci
             JOIN "Cart" c ON c."id" = ci."cartId"
             JOIN "Product" p ON p."id" = ci."productId"
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
             JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
+            LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
              AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
@@ -238,9 +249,16 @@ public static class CartEndpoints
             -- simply stops matching. One behaviour rather than two: if it
             -- cannot be added and cannot be ordered, showing it in the basket
             -- shows something that cannot be bought.
-            AND (p."supplierId" IS NULL OR EXISTS (
-              SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
-            ))
+            -- A part stays sellable while somebody will actually sell it to us: a live
+            -- offer from a live supplier, or no supplier relationship at all. What goes
+            -- is a part whose every supplier is switched off or whose every offer has
+            -- been withdrawn.
+            AND (
+              bo."productId" IS NOT NULL
+              OR (p."supplierId" IS NULL AND NOT EXISTS (
+                SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+              ))
+            )
             ORDER BY ci."addedAt" ASC
             """).ToListAsync(ct);
 
@@ -306,6 +324,11 @@ public record BasketLineRow(
     string ManufacturerName,
     string SystemSlug,
     double? ListPrice,
+    /// <summary>That line's own margin — the narrowest rung. See IPriceable.</summary>
+    double? ListRowMarkupPercent,
+    /// <summary>The best offer's price and whose it was — see IPriceable.</summary>
+    double? OfferPrice,
+    string? OfferSupplierId,
     int? Available,
     /// <summary>What one package is called.</summary>
     string PackagingUnit,

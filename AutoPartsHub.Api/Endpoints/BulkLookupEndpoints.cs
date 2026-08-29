@@ -84,10 +84,13 @@ public static class BulkLookupEndpoints
                        m."name" AS "ManufacturerName",
                        v."name" AS "SystemName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice",
+                       pli."markupPercent" AS "ListRowMarkupPercent",
+                       bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                        st."available" AS "Available"
                 FROM "Product" p
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
+                LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
                  AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
@@ -102,9 +105,16 @@ public static class BulkLookupEndpoints
                 -- supplier's parts are not in the catalogue, so a pasted list
                 -- reports them as not carried rather than quoting a price
                 -- nobody can buy at.
-                AND (p."supplierId" IS NULL OR EXISTS (
-                  SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
-                ))
+                -- A part stays sellable while somebody will actually sell it to us: a live
+                -- offer from a live supplier, or no supplier relationship at all. What goes
+                -- is a part whose every supplier is switched off or whose every offer has
+                -- been withdrawn.
+                AND (
+                  bo."productId" IS NOT NULL
+                  OR (p."supplierId" IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+                  ))
+                )
                 """).ToListAsync(ct);
 
             var byId = products.ToDictionary(p => p.Id);
@@ -198,4 +208,9 @@ public record BulkRow(
     string Id, string PartNumber, string Name, double BasePrice, string? SupplierId,
     int StockDays, string? GoodsCategoryId, int? WeightGrams, string PartType,
     string ManufacturerName, string SystemName, string SystemSlug,
-    double? ListPrice, int? Available) : IPriceable;
+    double? ListPrice,
+    /// <summary>That line's own margin — the narrowest rung. See IPriceable.</summary>
+    double? ListRowMarkupPercent,
+    /// <summary>The best offer's price and whose it was — see IPriceable.</summary>
+    double? OfferPrice, string? OfferSupplierId,
+    int? Available) : IPriceable;

@@ -106,33 +106,35 @@ public static class StockMovements
     /// Applies a change of order status to the shelves it drew on.
     /// </summary>
     /// <remarks>
-    /// Shipping is the moment goods leave: both <c>quantity</c> and
-    /// <c>reserved</c> come down by what was held, which keeps the promise and
-    /// the shelf consistent — dropping only one would leave either phantom
-    /// stock or a permanent promise against it.
+    /// This used to ask one question — has it shipped — which was enough while
+    /// the only way out of an order was through it. It is not enough now that
+    /// an order can be refused or called off: the goods never left, so
+    /// <c>quantity</c> is untouched, but the promise against them has to end or
+    /// the units stay reserved for an order nobody will ever pick.
     ///
-    /// Reversing a status set by mistake puts both back. Both move together in
-    /// either direction, so <c>reserved &lt;= quantity</c> holds throughout and
-    /// the check constraint never has to catch us.
+    /// So the caller works out the two deltas rather than a direction. They
+    /// come from <c>OrderStatuses.ShelfChangeFor</c>, which subtracts one shelf
+    /// position from another — three positions to get right instead of a case
+    /// for every pair of statuses, and no pair can be handled inconsistently
+    /// because no pair is handled at all.
     ///
-    /// Idempotent by construction: driven by whether the order crossed into or
-    /// out of shipped, not by what it was set to, so saving shipped twice
-    /// moves nothing the second time.
+    /// Shipping still moves both columns together, which is what keeps the
+    /// promise and the shelf consistent: dropping only one would leave either
+    /// phantom stock or a permanent promise against it.
+    ///
+    /// Idempotent by construction: a move to where the order already is has
+    /// both deltas at zero and does nothing.
     /// </remarks>
-    public static async Task ApplyShipmentChangeAsync(
-        AutoPartsContext db, string orderId, bool wasShipped, bool isShipped, CancellationToken ct = default)
+    public static async Task ApplyShelfChangeAsync(
+        AutoPartsContext db, string orderId, Orders.ShelfChange change,
+        CancellationToken ct = default)
     {
-        if (wasShipped == isShipped) return;
-
-        // Signed once rather than per statement: leaving is negative, coming
-        // back is positive, and both columns move by the same amount either
-        // way so reserved <= quantity survives the trip.
-        var direction = isShipped ? -1 : 1;
+        if (change.Quantity == 0 && change.Reserved == 0) return;
 
         await db.Database.ExecuteSqlAsync($"""
             UPDATE "StockLevel" s
-            SET "quantity" = s."quantity" + (a."quantity" * {direction}),
-                "reserved" = s."reserved" + (a."quantity" * {direction}),
+            SET "quantity" = s."quantity" + (a."quantity" * {change.Quantity}),
+                "reserved" = s."reserved" + (a."quantity" * {change.Reserved}),
                 "updatedAt" = now()
             FROM "OrderItemAllocation" a
             JOIN "OrderItem" i ON i."id" = a."orderItemId"

@@ -3,6 +3,7 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Api.Pricing;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -31,7 +32,8 @@ public static class AdminPriceListWriteEndpoints
         // has looked at the result. The response reports what matched and what
         // did not; activating is a second, deliberate request.
         app.MapPost("/api/admin/price-lists", async (
-            JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+            JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db,
+            ILoggerFactory loggers, CancellationToken ct) =>
         {
             var g = gate.RequireAdmin(http);
             if (!g.Ok) return g.Response!;
@@ -39,16 +41,103 @@ public static class AdminPriceListWriteEndpoints
             var details = PriceLists.ReadListDetails(body);
             if (!details.Ok) return Results.BadRequest(new { error = details.Error });
 
+            var rowsField = JsonValues.Get(body, "rows");
+            var rowsSent = rowsField is { ValueKind: JsonValueKind.Array } sent
+                ? sent.GetArrayLength()
+                : 0;
+
+            // Writes the attempt down, and never fails the request for doing
+            // so. An upload that stored forty thousand prices and then could
+            // not write its own log entry is still an upload that stored forty
+            // thousand prices. Losing the log is worth a line in the server
+            // log; it is not worth telling an admin their prices did not land
+            // when they did.
+            async Task<string?> Log(
+                string? priceListId, string outcome, int accepted, string? error,
+                List<RejectedRow> rejected)
+            {
+                try
+                {
+                    return await RecordImportAsync(
+                        db,
+                        new ImportWrite(
+                            priceListId,
+                            details.Value!.Name,
+                            details.Value.SourceName,
+                            g.Session!.UserId,
+                            g.Session.Name,
+                            outcome,
+                            rowsSent,
+                            accepted,
+                            rejected.Count,
+                            error),
+                        rejected,
+                        ct);
+                }
+                catch (Exception cause)
+                {
+                    loggers.CreateLogger("PriceListImports")
+                        .LogError(cause, "Could not record the price list import.");
+                    return null;
+                }
+            }
+
             // Match on the normalised form, the way search and the bulk lookup
             // do, so a supplier's spacing does not decide whether their price
             // lands.
-            var products = await db.Products
-                .Select(p => new { p.Id, p.PartNumber }).AsNoTracking().ToListAsync(ct);
+            // `cost` is what each part costs to buy TODAY: the active list's
+            // figure where it covers the part, the part's own basePrice where
+            // it does not — the same fallback the pricing engine applies. What
+            // an upload is measured against has to be what it would actually
+            // replace, not a stored number the catalogue may not be using.
+            var products = await db.Database.SqlQuery<CataloguePriceRow>($"""
+                SELECT p."id" AS "Id", p."partNumber" AS "PartNumber",
+                       COALESCE(a."price", p."basePrice") AS "Cost"
+                FROM "Product" p
+                LEFT JOIN "PriceList" l ON l."active" = TRUE
+                LEFT JOIN "PriceListItem" a ON a."priceListId" = l."id" AND a."productId" = p."id"
+                """).ToListAsync(ct);
+
+            // Exact equivalents only. A close or partial substitute is a
+            // different part, and reading this part's cost off it would be
+            // pricing one thing from the invoice for another.
+            var interchanges = await db.Database.SqlQuery<InterchangeTargetRow>($"""
+                SELECT "sourceId" AS "ProductId", "targetPartNo" AS "TargetPartNumber"
+                FROM "Interchange"
+                WHERE "exactMatch" = TRUE
+                """).ToListAsync(ct);
+
             var currencies = await db.Currencies
                 .Select(c => new { c.Code, c.Rate }).AsNoTracking().ToListAsync(ct);
 
             var productIdByPartNumber = new Dictionary<string, string>();
-            foreach (var p in products) productIdByPartNumber[PartNumbers.Normalise(p.PartNumber)] = p.Id;
+            var costNow = new Dictionary<string, double>();
+            foreach (var p in products)
+            {
+                productIdByPartNumber[PartNumbers.Normalise(p.PartNumber)] = p.Id;
+                costNow[p.Id] = p.Cost;
+            }
+
+            // Several of our parts can name the same equivalent, so this is a
+            // list. The reader refuses an ambiguous one rather than picking
+            // from it.
+            var productIdsByInterchange = new Dictionary<string, List<string>>();
+            foreach (var i in interchanges)
+            {
+                var key = PartNumbers.Normalise(i.TargetPartNumber);
+                // A number that is already one of our own is not a
+                // substitution — the direct match finds it first, and letting
+                // it in here would only add a second route to the same answer.
+                if (productIdByPartNumber.ContainsKey(key)) continue;
+                if (productIdsByInterchange.TryGetValue(key, out var found))
+                {
+                    if (!found.Contains(i.ProductId)) found.Add(i.ProductId);
+                }
+                else
+                {
+                    productIdsByInterchange[key] = [i.ProductId];
+                }
+            }
 
             var ratesByCode = new Dictionary<string, ConversionRate>();
             foreach (var c in currencies)
@@ -57,20 +146,63 @@ public static class AdminPriceListWriteEndpoints
             }
 
             var parsed = PriceLists.ReadPriceRows(
-                JsonValues.Get(body, "rows"), productIdByPartNumber, ratesByCode);
-            if (!parsed.Ok) return Results.BadRequest(new { error = parsed.Error });
+                rowsField, productIdByPartNumber, productIdsByInterchange, ratesByCode);
 
-            var list = await CreateAsync(db, details.Value!, parsed.Value!.Rows, ct);
+            if (!parsed.Ok)
+            {
+                var refusedId = await Log(null, "REFUSED", 0, parsed.Error, parsed.Rejected);
+
+                // The id goes back with the refusal so the screen that reports
+                // it can link straight to the lines, rather than sending the
+                // admin to a history page to find the upload they are already
+                // looking at.
+                return Results.BadRequest(new { error = parsed.Error, importId = refusedId });
+            }
+
+            // What the file would do to the prices already in force, read
+            // before anything is written because the answer can refuse the
+            // whole upload. A real price update moves most parts a little; a
+            // column read from the wrong place moves nearly everything by an
+            // absurd multiple, and that is visible in the shape of the file
+            // before anyone reads a line of it.
+            var movement = PriceLists.ReadPriceMovement(parsed.Value!.Rows, costNow);
+            var confirmed = JsonValues.Get(body, "confirmLargeChange") is { ValueKind: JsonValueKind.True };
+
+            if (PriceLists.MovementIsAlarming(movement) && !confirmed)
+            {
+                var refusal = PriceLists.MovementRefusal(movement);
+                var stoppedId = await Log(
+                    null, "REFUSED", 0, refusal, parsed.Value.Rejected);
+
+                // `movement` goes back with it. The refusal has to be arguable
+                // — an admin who knows the move is real needs to see the same
+                // numbers the guard saw before deciding to send it again.
+                return Results.Json(
+                    new { error = refusal, importId = stoppedId, movement },
+                    statusCode: 409);
+            }
+
+            var list = await CreateAsync(db, details.Value!, parsed.Value.Rows, ct);
+
+            var importId = await Log(
+                list.Id, "STORED", parsed.Value.Rows.Count, null, parsed.Value.Rejected);
 
             return Results.Json(
                 new
                 {
                     list = Serialise(list),
+                    importId,
                     accepted = parsed.Value.Rows.Count,
+                    // What it will do when it is switched on. Reported on every
+                    // upload, not only the alarming ones: "what does this file
+                    // change" is the question an admin has before activating,
+                    // and a count of accepted rows does not answer it.
+                    movement,
                     // Capped in the response only; every rejection is counted,
-                    // and the first few are named so the admin can see the
-                    // shape of what went wrong without the payload carrying a
-                    // whole failed file back.
+                    // the first few are named so the admin can see the shape of
+                    // what went wrong without the payload carrying a whole
+                    // failed file back, and the rest are read through
+                    // `importId` rather than being gone.
                     rejectedCount = parsed.Value.Rejected.Count,
                     rejected = parsed.Value.Rejected.Take(50),
                 },
@@ -121,9 +253,75 @@ public static class AdminPriceListWriteEndpoints
             var activeRaw = JsonValues.Get(body, "active");
             bool? active = activeRaw is null ? null : activeRaw.Value.ValueKind == JsonValueKind.True;
 
-            await UpdateAsync(db, id, nameSent, name, descriptionSent, description, active, ct);
+            // The margin everything on this file earns. Sent as null to take it
+            // away again, which is why "was it sent" is a separate question
+            // from what it holds — null and 0 are both meaningful here and
+            // neither means "unchanged".
+            var markupSent = JsonValues.Get(body, "markupPercent") is not null;
+            var markup = PurchaseMarkups.Read(JsonValues.Get(body, "markupPercent"), "The list markup");
+            if (!markup.Ok) return Results.BadRequest(new { error = markup.Error });
+
+            await UpdateAsync(
+                db, id, nameSent, name, descriptionSent, description, active,
+                markupSent, markup.Value, ct);
 
             return Results.Ok(new { list = Serialise((await ById(db, id, ct))!) });
+        });
+
+        // PATCH /api/admin/price-lists/<id>/items/<productId> — one line's own
+        // margin.
+        //
+        // Its own route rather than a field on the list PATCH. A list has one
+        // name and forty thousand lines, and a body that could carry either
+        // would have to be read twice — once as "rename this list" and once as
+        // "reprice this part".
+        //
+        // Addressed by (list, part) because that is the pair the screen is
+        // looking at and the pair the unique index is on. A line id would be
+        // neither: the same part on the same list is a different row every time
+        // the file is loaded again, so a link to one would rot on the next
+        // upload.
+        app.MapPatch("/api/admin/price-lists/{id}/items/{productId}", async (
+            string id, string productId, JsonElement body, HttpContext http, AdminGate gate,
+            AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            if (await ById(db, id, ct) is null)
+            {
+                return Results.NotFound(new { error = "Price list not found." });
+            }
+
+            // Absent is the one thing this route has nothing to do: a PATCH
+            // whose body mentions no margin is not "clear it", it is a request
+            // that forgot to say what it wanted. Null IS a request — it takes
+            // the line's margin away.
+            if (JsonValues.Get(body, "markupPercent") is null)
+            {
+                return Results.BadRequest(
+                    new { error = "Send a markupPercent, or null to clear it." });
+            }
+
+            var markup = PurchaseMarkups.Read(JsonValues.Get(body, "markupPercent"), "The line markup");
+            if (!markup.Ok) return Results.BadRequest(new { error = markup.Error });
+
+            var written = await db.Database.ExecuteSqlAsync($"""
+                UPDATE "PriceListItem"
+                   SET "markupPercent" = {markup.Value}::double precision
+                 WHERE "priceListId" = {id} AND "productId" = {productId}
+                """, ct);
+
+            if (written == 0)
+            {
+                // A part the list does not carry. Reported rather than shrugged
+                // off: a silent success over a line that is not there reads as
+                // saved, and the margin somebody typed would be gone the next
+                // time the screen loaded.
+                return Results.NotFound(new { error = "That part is not on this list." });
+            }
+
+            return Results.Ok(new { productId, markupPercent = markup.Value });
         });
 
         // DELETE /api/admin/price-lists/<id>
@@ -165,10 +363,75 @@ public static class AdminPriceListWriteEndpoints
     }
 
     /// <summary>
+    /// Writes down what an upload did.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately its own transaction rather than part of <see
+    /// cref="CreateAsync"/>: a refused file never gets that far and still has
+    /// to be recorded, so the log cannot be a step inside the write it is
+    /// logging.
+    ///
+    /// At most <see cref="PriceLists.StoredRejections"/> lines are kept. The
+    /// count on the import row is always exact; it is the transcript that
+    /// stops, and the two numbers are stored separately so a screen can say
+    /// which it is showing.
+    /// </remarks>
+    private static async Task<string> RecordImportAsync(
+        AutoPartsContext db, ImportWrite input, List<RejectedRow> rejected, CancellationToken ct)
+    {
+        var id = Ids.New();
+        var stored = rejected.Take(PriceLists.StoredRejections).ToList();
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        await db.Database.ExecuteSqlAsync($"""
+            INSERT INTO "PriceListImport" ("id", "priceListId", "listName", "sourceName",
+                                           "uploadedById", "uploadedByName", "outcome",
+                                           "rowsSent", "accepted", "rejected", "rejectedStored",
+                                           "error")
+            VALUES ({id}, {input.PriceListId}, {input.ListName}, {input.SourceName},
+                    {input.UploadedById}, {input.UploadedByName}, {input.Outcome},
+                    {input.RowsSent}, {input.Accepted}, {input.Rejected}, {stored.Count},
+                    {input.Error})
+            """, ct);
+
+        for (var at = 0; at < stored.Count; at += InsertChunk)
+        {
+            var chunk = stored.GetRange(at, Math.Min(InsertChunk, stored.Count - at));
+
+            var ids = chunk.Select(_ => Ids.New()).ToArray();
+            var importIds = chunk.Select(_ => id).ToArray();
+            var lines = chunk.Select(r => r.Line).ToArray();
+            var partNumbers = chunk.Select(r => r.PartNumber).ToArray();
+            var prices = chunk.Select(r => r.Price).ToArray();
+            var currencies = chunk.Select(r => r.Currency).ToArray();
+            var reasons = chunk.Select(r => r.Reason).ToArray();
+
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO "PriceListImportRow" ("id", "importId", "line", "partNumber",
+                                                  "price", "currency", "reason")
+                SELECT * FROM unnest(
+                  {ids}::text[],
+                  {importIds}::text[],
+                  {lines}::int[],
+                  {partNumbers}::text[],
+                  {prices}::text[],
+                  {currencies}::text[],
+                  {reasons}::text[]
+                )
+                """, ct);
+        }
+
+        await transaction.CommitAsync(ct);
+
+        return id;
+    }
+
+    /// <summary>
     /// Stores an upload: the list, then its lines, in one transaction.
     /// </summary>
     /// <remarks>
-    /// The lines go in as six arrays unnested into rows rather than one
+    /// The lines go in as seven arrays unnested into rows rather than one
     /// statement per line — a supplier file is tens of thousands of prices,
     /// and that many round trips is the difference between a request and a
     /// timeout.
@@ -200,17 +463,19 @@ public static class AdminPriceListWriteEndpoints
             var prices = chunk.Select(r => r.Price).ToArray();
             var sourcePrices = chunk.Select(r => r.SourcePrice).ToArray();
             var sourceCurrencies = chunk.Select(r => r.SourceCurrency).ToArray();
+            var sourcePartNumbers = chunk.Select(r => r.SourcePartNumber).ToArray();
 
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "PriceListItem" ("id", "priceListId", "productId", "price",
-                                             "sourcePrice", "sourceCurrency")
+                                             "sourcePrice", "sourceCurrency", "sourcePartNumber")
                 SELECT * FROM unnest(
                   {ids}::text[],
                   {listIds}::text[],
                   {productIds}::text[],
                   {prices}::double precision[],
                   {sourcePrices}::double precision[],
-                  {sourceCurrencies}::text[]
+                  {sourceCurrencies}::text[],
+                  {sourcePartNumbers}::text[]
                 )
                 """, ct);
         }
@@ -230,7 +495,8 @@ public static class AdminPriceListWriteEndpoints
     /// </remarks>
     private static async Task UpdateAsync(
         AutoPartsContext db, string id, bool nameSent, string? name,
-        bool descriptionSent, string? description, bool? active, CancellationToken ct)
+        bool descriptionSent, string? description, bool? active,
+        bool markupSent, double? markupPercent, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
@@ -248,6 +514,12 @@ public static class AdminPriceListWriteEndpoints
                                         ELSE "description" END,
                    "active" = CASE WHEN {active is not null} THEN {active}::boolean
                                    ELSE "active" END,
+                   -- Null is a value here rather than an absence: it is how the
+                   -- margin is taken away again, so the CASE asks whether the
+                   -- field was sent, not whether it holds anything.
+                   "markupPercent" = CASE WHEN {markupSent}
+                                          THEN {markupPercent}::double precision
+                                          ELSE "markupPercent" END,
                    "updatedAt" = CURRENT_TIMESTAMP
              WHERE "id" = {id}
             """, ct);
@@ -261,6 +533,7 @@ public static class AdminPriceListWriteEndpoints
         (await db.Database.SqlQuery<PriceListRow>($"""
             SELECT l."id" AS "Id", l."name" AS "Name", l."description" AS "Description",
                    l."active" AS "Active", l."sourceName" AS "SourceName",
+                   l."markupPercent" AS "MarkupPercent",
                    n."count"::int AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
@@ -277,8 +550,20 @@ public static class AdminPriceListWriteEndpoints
         description = l.Description,
         active = l.Active,
         sourceName = l.SourceName,
+        markupPercent = l.MarkupPercent,
         itemCount = l.ItemCount,
         createdAt = Timestamps.Iso(l.CreatedAt),
         updatedAt = Timestamps.Iso(l.UpdatedAt),
     };
 }
+
+/// <summary>A part to match an upload against, and what it costs to buy today.</summary>
+/// <param name="Cost">
+/// The active list's figure where it covers the part, the part's own
+/// <c>basePrice</c> where it does not — the same fallback the pricing engine
+/// applies, so an upload is measured against what it would actually replace.
+/// </param>
+public record CataloguePriceRow(string Id, string PartNumber, double Cost);
+
+/// <summary>One cross-reference number, and the part of ours it is equivalent to.</summary>
+public record InterchangeTargetRow(string ProductId, string TargetPartNumber);

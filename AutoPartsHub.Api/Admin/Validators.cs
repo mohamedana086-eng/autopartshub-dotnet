@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AutoPartsHub.Api.Catalogue;
+using AutoPartsHub.Api.Pricing;
 
 namespace AutoPartsHub.Api.Admin;
 
@@ -64,10 +65,39 @@ public static class Validators
         var stockDays = ReadCount(JsonValues.Get(body, "defaultStockDays"), "Delivery time");
         if (!stockDays.Ok) return Fail<SupplierInput>(stockDays.Error!);
 
+        // A preference, not a score: any whole number, and zero means "no
+        // preference stated" rather than "worst". Bounded so a typo cannot make
+        // one supplier permanently unbeatable in a way nobody would look for.
+        var priorityField = JsonValues.Get(body, "priority");
+        var priority = priorityField is null || JsonValues.AsString(priorityField).Trim().Length == 0
+            ? 0d
+            : JsonValues.AsNumber(priorityField) ?? double.NaN;
+        if (!JsonValues.IsWhole(priority) || priority is < 0 or > 100)
+        {
+            return Fail<SupplierInput>("Priority must be a whole number between 0 and 100.");
+        }
+
+        var minimumField = JsonValues.Get(body, "minOrderAmount");
+        var minimum = minimumField is null || JsonValues.AsString(minimumField).Trim().Length == 0
+            ? 0d
+            : JsonValues.AsNumber(minimumField) ?? double.NaN;
+        if (double.IsNaN(minimum) || double.IsInfinity(minimum) || minimum < 0)
+        {
+            return Fail<SupplierInput>("A minimum order must be zero or more.");
+        }
+
+        // Shared with the price list and the price-list line, because three
+        // rungs of one chain rejecting different numbers would be three
+        // answers to one question.
+        var markup = PurchaseMarkups.Read(JsonValues.Get(body, "markupPercent"), "A supplier markup");
+        if (!markup.Ok) return Fail<SupplierInput>(markup.Error!);
+
         return Ok(new SupplierInput(
             name, code, slug, Optional(body, "description"), reliability,
             rating.Value, returns.Value, Optional(body, "country"),
-            guarantee.Value, stockDays.Value, Optional(body, "purchaseCurrencyId")));
+            guarantee.Value, stockDays.Value, Optional(body, "purchaseCurrencyId"),
+            (int)priority, Math.Round(minimum * 100, MidpointRounding.AwayFromZero) / 100,
+            markup.Value));
     }
 
     /// <summary>Lowercase, hyphenated, url-safe — a supplier's page is addressed by it.</summary>
@@ -390,7 +420,17 @@ public record Validated<T>(bool Ok, T? Value, string? Error);
 public record SupplierInput(
     string Name, string Code, string Slug, string? Description, string Reliability,
     int? Rating, bool? AcceptsReturns, string? Country, int? GuaranteeMonths,
-    int? DefaultStockDays, string? PurchaseCurrencyId);
+    int? DefaultStockDays, string? PurchaseCurrencyId,
+    /// <summary>Which supplier to prefer when several offer a part, higher winning.</summary>
+    int Priority,
+    /// <summary>The least they will take an order for. Zero means no minimum.</summary>
+    double MinOrderAmount,
+    /// <summary>
+    /// The margin their parts earn, or null where no such agreement exists.
+    /// The bottom rung of the purchase-side chain — null rather than zero for
+    /// "no agreement", because zero means sell their parts at cost.
+    /// </summary>
+    double? MarkupPercent);
 
 public record WarehouseInput(
     string Code, string Name, string? City, string? Address, bool Active, int Priority);
