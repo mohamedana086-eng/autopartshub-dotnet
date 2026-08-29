@@ -2,6 +2,7 @@ using System.Text.Json;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Api.Endpoints;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Admin;
@@ -155,9 +156,16 @@ public static class MarkupRules
 
         var type = JsonValues.Get(body, "type") is { } t ? JsonValues.AsString(t) : "PERCENT";
         if (type.Length == 0) type = "PERCENT";
-        if (type is not ("PERCENT" or "AMOUNT" or "FIXED"))
+        // Read from the shared vocabulary rather than written out here. This
+        // list said PERCENT, AMOUNT, FIXED while the floor rule below already
+        // handled PERCENT_MIN — so the endpoint refused the type before the
+        // code for it could run, the other API accepted it, and the refusal
+        // named three types where the other API named four. Two APIs refusing
+        // the same thing in different words are two products; one refusing what
+        // the other accepts is worse.
+        if (!MarkupTypes.All.Contains(type))
         {
-            return (null, "Adjustment type must be PERCENT, AMOUNT, FIXED.");
+            return (null, $"Adjustment type must be {string.Join(", ", MarkupTypes.All)}.");
         }
 
         var value = JsonValues.AsNumber(JsonValues.Get(body, "value")) ?? double.NaN;
@@ -324,6 +332,44 @@ public static class MarkupRules
         await transaction.CommitAsync(ct);
 
         return id;
+    }
+
+    /// <summary>Writes a whole ladder of bands, or none of them.</summary>
+    /// <remarks>
+    /// One transaction rather than a loop over <see cref="Create"/>: half a
+    /// ladder prices half the catalogue from bands somebody chose and the other
+    /// half from the tier default, which is the failure the ladder validation
+    /// exists to prevent — and it would be a failure nobody could see on the
+    /// rules list, because every band that landed looks right on its own.
+    /// </remarks>
+    public static async Task<List<string>> CreateLadder(
+        AutoPartsContext db, IReadOnlyList<RuleWrite> inputs, CancellationToken ct)
+    {
+        var ids = inputs.Select(_ => Ids.New()).ToList();
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        for (var i = 0; i < inputs.Count; i++)
+        {
+            var input = inputs[i];
+
+            await db.Database.ExecuteSqlAsync($"""
+                INSERT INTO "MarkupRule" ("id", "label", "priority", "specificity",
+                                          "purchasePriceFrom", "purchasePriceTo", "type", "value",
+                                          "minAmount", "startsAt", "endsAt")
+                VALUES ({ids[i]}, {input.Label}, {input.Priority},
+                        {MarkupDimensions.SpecificityOf(input.Conditions, input.HasRange)},
+                        {input.PurchasePriceFrom}, {input.PurchasePriceTo},
+                        {input.Type}, {input.Value},
+                        {input.MinAmount}, {input.StartsAt}, {input.EndsAt})
+                """, ct);
+
+            await ReplaceConditions(db, ids[i], input.Conditions, ct);
+        }
+
+        await transaction.CommitAsync(ct);
+
+        return ids;
     }
 
     /// <summary>Rewrites a rule, conditions and all, and recomputes what it ranks by.</summary>
