@@ -279,6 +279,21 @@ goods categories are: a join would have to be added to all six queries that
 price a row, and one of them forgetting it is the silent-wrong-price failure
 `BestOfferJoinTests` exists to catch.
 
+**A ladder of standard margins**, `POST /api/admin/markup-rules/ladder`. What
+it writes is ordinary markup rules, one per band; there is no ladder table and
+nothing marks them as belonging together. The engine could always express this
+— each band is a rule with a purchase-price band — so what the endpoint adds is
+the shape check: a gap, an overlap, a ladder not starting at zero, or one
+closed at the top. Each of those is invisible on a form that writes one rule at
+a time and shows up months later as a part priced from the tier default, so the
+refusal names the numbers rather than saying the ladder is invalid.
+
+Porting it turned up a divergence worth naming: `MarkupRules.ParseBody` here
+refused `PERCENT_MIN` in its type list while the code handling that type's
+floor sat below it, unreachable. This port could not create a rule the other
+one could, and the two refusals named a different number of types. Both now
+read the shared vocabulary.
+
 **Tickets**, `/api/tickets` for the customer and `/api/admin/tickets` for the
 queue. The status is derived rather than set — a customer's message opens it,
 ours answers it, and a customer writing back to a resolved ticket reopens it —
@@ -513,6 +528,7 @@ that one day it will not be.
 | `PricingEngineTests` | markup, then discount, then currency, each exactly once |
 | `PurchaseMarkupTests` | the buying side's own chain, and where it sits in the ladder |
 | `BusinessMailTests` | which events are worth a message, and the one that must produce none |
+| `MarkupLadderTests` | the four ladder shapes that are refused, and why each matters |
 | `PriceListTests` | the conversion divides, and every refusal names the right reason |
 | `ValidatorTests` | what the admin forms may send, and the urls that only look like paths |
 

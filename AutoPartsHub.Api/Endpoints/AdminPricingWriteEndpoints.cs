@@ -3,6 +3,7 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Api.Pricing;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -237,6 +238,57 @@ public static class AdminPricingWriteEndpoints
 
             return Results.Json(
                 new { rule = await MarkupRules.ById(db, id, ct) }, statusCode: 201);
+        });
+
+        // POST /api/admin/markup-rules/ladder — a whole ladder of margin bands
+        // at once.
+        //
+        // What it writes is ordinary markup rules, one per band. There is no
+        // ladder table, no ladder id and nothing marking these rules as
+        // belonging together: the moment they exist they are rules like any
+        // other, editable and deletable one at a time. That is deliberate. A
+        // ladder is a way of SAYING something, not a second kind of thing for
+        // the engine to know about — and a rule that belonged to a ladder would
+        // be a rule somebody could not safely edit.
+        //
+        // It adds rather than replaces. A ladder that swept away the rules it
+        // thought were its own would eventually sweep away one an admin had
+        // edited by hand for a reason nobody wrote down.
+        app.MapPost("/api/admin/markup-rules/ladder", async (
+            JsonElement body, HttpContext http, AdminGate gate, AutoPartsContext db,
+            CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            // The refusals are the point of this endpoint: a gap or an overlap
+            // between bands is invisible on a screen that writes one rule at a
+            // time, and shows up months later as one part in a thousand priced
+            // from the tier default.
+            var read = MarkupLadders.Read(body);
+            if (!read.Ok) return Results.BadRequest(new { error = read.Error });
+
+            var ladder = read.Value!;
+
+            var ids = await MarkupRules.CreateLadder(
+                db,
+                [.. ladder.Rungs.Select(rung => new MarkupRules.RuleWrite(
+                    MarkupLadders.RungLabel(ladder.Label, rung),
+                    0,
+                    [],
+                    rung.From,
+                    rung.To,
+                    ladder.Type,
+                    rung.Value,
+                    ladder.MinAmount,
+                    null,
+                    null))],
+                ct);
+
+            var rules = new List<object?>();
+            foreach (var id in ids) rules.Add(await MarkupRules.ById(db, id, ct));
+
+            return Results.Json(new { rules }, statusCode: 201);
         });
 
         // PUT /api/admin/markup-rules/<id> — the whole rule, conditions and all.

@@ -156,8 +156,14 @@ public class TicketTests
 
         Assert.NotNull(dir);
 
+        // Line endings normalised before anything below looks for a newline.
+        // This repository is committed with LF and checked out with CRLF on
+        // Windows, so a scan matching "…(\n" passes on the file as written and
+        // fails on the same file after a checkout — which is what happened, and
+        // which says nothing whatever about internal notes.
         var source = File.ReadAllText(Path.Combine(
-            dir!.FullName, "AutoPartsHub.Api", "Endpoints", "TicketEndpoints.cs"));
+                dir!.FullName, "AutoPartsHub.Api", "Endpoints", "TicketEndpoints.cs"))
+            .Replace("\r\n", "\n");
 
         // Comments stripped: the file explains at length what an internal note
         // is and why there are two readers, naming both freely. A scan that
