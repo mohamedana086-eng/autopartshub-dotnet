@@ -1,0 +1,99 @@
+name: CI
+
+# Runs on every push and pull request. Nothing here needs a database or any
+# secret: the connection string and the auth secret are both resolved lazily at
+# the first request, so a build never reaches for them, and every test in the
+# suite is either pure or reads the source as text.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore AutoPartsHub.slnx
+
+      - name: Build
+        run: dotnet build AutoPartsHub.slnx --no-restore -c Release
+
+      - name: Tests
+        run: dotnet test AutoPartsHub.slnx --no-build -c Release
+
+      # The Dockerfile's own build, run without Docker. This is the step that
+      # would have caught a publish failing on the release configuration — the
+      # image has never been built on the machine this port was written on, so
+      # `dotnet publish` is the part of it that can be proven here.
+      - name: Publish, the way the image does
+        run: dotnet publish AutoPartsHub.Api/AutoPartsHub.Api.csproj -c Release -o /tmp/publish
+
+  parity:
+    name: The port still agrees with the original
+    runs-on: ubuntu-latest
+
+    # Three rules this port is built on, each of which a hurried change would
+    # break without anything else in this pipeline noticing. They are greps
+    # rather than tests because what they check is the ABSENCE of something,
+    # and a test cannot be written against code nobody has written yet.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No Dapper
+        # The specification asks for EF Core with Dapper; this port uses EF
+        # Core with raw SQL where LINQ cannot reach, which is one dependency
+        # rather than two and the same statements the other API runs.
+        run: |
+          if grep -rn "Dapper" --include=*.csproj --include=*.cs .; then
+            echo "::error::Dapper is back. Raw SQL goes through EF's SqlQuery/ExecuteSql."
+            exit 1
+          fi
+          echo "No Dapper."
+
+      - name: No query text built from strings
+        # Every raw query is an interpolated FormattableString, and EF turns
+        # each hole into a parameter. Concatenating with + instead is how a
+        # parameter stops being a parameter — and the compiler cannot tell the
+        # two apart, because both are strings.
+        run: |
+          if grep -rnE '(SqlQuery|SqlQueryRaw|ExecuteSql|ExecuteSqlRaw)[^;]*"\s*\+' \
+               --include=*.cs AutoPartsHub.Api; then
+            echo "::error::A query looks assembled from strings. Use an interpolated \$\"\"\" block."
+            exit 1
+          fi
+          echo "No assembled query text."
+
+      - name: The refusals still read the same
+        # The messages reach a person in a form. Two APIs refusing the same
+        # thing in different words are two products, so a handful of the
+        # sentences are pinned here as well as in the tests — this one fails
+        # on a repository somebody has edited without running the suite.
+        run: |
+          missing=0
+          for sentence in \
+            "Priority must be a whole number between 0 and 100." \
+            "A minimum order must be zero or more." \
+            "Send a markupPercent, or null to clear it." \
+            "That part is not on this list."
+          do
+            if ! grep -rqF "$sentence" --include=*.cs AutoPartsHub.Api; then
+              echo "::error::Missing refusal: $sentence"
+              missing=1
+            fi
+          done
+          [ "$missing" = 0 ] && echo "The refusals are all still there."
+          exit $missing
