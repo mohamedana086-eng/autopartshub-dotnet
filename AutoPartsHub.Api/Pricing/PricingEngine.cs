@@ -75,30 +75,46 @@ public static class PricingEngine
             .ThenByDescending(r => r.Priority)
             .FirstOrDefault();
 
-        // 1. Markup — one winner, down a ladder of three rungs.
+        // 1. Markup — one winner, down a ladder of four rungs.
         //
         //      a matching rule       most specific wins, then priority
+        //      the purchase side     line, list, supplier — resolved already
         //      the goods category    what the shop decided this KIND is worth
         //      the client category   the account's generic default
         //
-        //  The middle rung sits where it does deliberately. A goods category
-        //  is a statement about this particular part — somebody put it in
+        //  The bottom two sit where they do deliberately. A goods category is
+        //  a statement about this particular part — somebody put it in
         //  "slow-moving" on purpose — where the client category default is a
         //  catch-all for the buyer covering everything nobody has priced. The
         //  more deliberate statement wins.
         //
-        //  A rule still beats both, because a rule is how a category baseline
-        //  gets overridden for particular customers: "consumables are +35%,
-        //  but trade accounts pay +22%".
+        //  The purchase rung sits above the category because all three of its
+        //  own rungs name a commercial arrangement — this line, this file,
+        //  this supplier — where a category names a kind of thing. Somebody
+        //  setting a margin against a supplier means "this is what we make on
+        //  their parts", and a category baseline quietly outranking that would
+        //  make the field decorative.
+        //
+        //  A rule still beats all of them, and that ordering is load-bearing
+        //  rather than a preference. A rule is the ONLY markup that can see who
+        //  is asking. If a supplier's margin outranked one, typing a number
+        //  into a supplier form would silently switch off every
+        //  customer-specific rule on their parts — "consumables are +35%, but
+        //  trade accounts pay +22%" would quietly stop being true, with nothing
+        //  on any screen to say so.
+        var purchaseMarkup = ctx.PurchaseMarkup;
         var categoryMarkup = ctx.GoodsCategoryMarkup;
 
         var markedUp = winner is not null
             ? ApplyMarkup(ctx.BasePrice, winner.Type, winner.Value, winner.MinAmount)
-            : categoryMarkup is not null
-                ? ApplyMarkup(
-                    ctx.BasePrice, categoryMarkup.Type, categoryMarkup.Value,
-                    categoryMarkup.MinAmount)
-                : ApplyMarkup(ctx.BasePrice, MarkupType.Percent, ctx.ClientCategoryMarkupPercent);
+            : purchaseMarkup is not null
+                ? ApplyMarkup(ctx.BasePrice, MarkupType.Percent, purchaseMarkup.Percent)
+                : categoryMarkup is not null
+                    ? ApplyMarkup(
+                        ctx.BasePrice, categoryMarkup.Type, categoryMarkup.Value,
+                        categoryMarkup.MinAmount)
+                    : ApplyMarkup(
+                        ctx.BasePrice, MarkupType.Percent, ctx.ClientCategoryMarkupPercent);
 
         // 2. Discount. Clamped to 0–100: a negative one would quietly become a
         //    surcharge, and over 100 would pay the customer to take the part.
@@ -120,9 +136,11 @@ public static class PricingEngine
         // does the person who has to explain it.
         var markupLabel = winner is not null
             ? winner.Label
-            : categoryMarkup is not null
-                ? $"{categoryMarkup.Label} category markup"
-                : "Client category default markup";
+            : purchaseMarkup is not null
+                ? purchaseMarkup.Label
+                : categoryMarkup is not null
+                    ? $"{categoryMarkup.Label} category markup"
+                    : "Client category default markup";
 
         return new PriceResult(
             BasePrice: ctx.BasePrice,
@@ -353,7 +371,17 @@ public record PricingContext(
     /// arguments — the same property that lets the engine be compared against
     /// the TypeScript original over four hundred generated cases.
     /// </summary>
-    GoodsCategoryMarkup? GoodsCategoryMarkup = null);
+    GoodsCategoryMarkup? GoodsCategoryMarkup = null,
+    /// <summary>
+    /// The margin stated on the buying side, already resolved down its own
+    /// chain of line to list to supplier by <c>PurchaseMarkups.Of</c>.
+    ///
+    /// Passed in rather than looked up, for the same reason the category
+    /// markup is: it keeps this a pure function of its arguments, which is
+    /// what lets the whole engine be compared against the TypeScript original
+    /// over four hundred generated cases.
+    /// </summary>
+    PurchaseMarkup? PurchaseMarkup = null);
 
 /// <summary>
 /// A goods category's own markup — the baseline for everything in it.

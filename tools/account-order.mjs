@@ -203,17 +203,42 @@ try {
   await call(NODE, `/api/admin/products/${productId}/stock`, 'PUT',
     { levels: [{ warehouseId: warehouse.id, quantity: 20, reserved: 0 }] }, admin);
 
-  // Three units off a shelf of twenty. Shipping draws them down and leaves
-  // seventeen with nothing reserved; going back to processing puts them back
-  // as reserved rather than as free stock; and `paid` is on the shipped side
-  // of the line, so moving to it from shipped moves nothing.
+  // Three units off a shelf of twenty, walked the whole way.
+  //
+  // Accepting and picking change nothing on the shelf — the units were already
+  // promised when the order was placed. Shipping is the moment they leave:
+  // both columns come down, leaving seventeen with nothing reserved. Delivery
+  // and payment are both on the gone side of that line, so neither moves
+  // anything.
+  //
+  // The walk used to double back — shipped, then processing again — to prove
+  // the reversal put the units back. It cannot any more: an order does not go
+  // backwards, and the release it was really testing is now its own status.
+  // See the cancellation walk below.
   const expected = [
+    'accepted   20/3',
     'processing 20/3',
     'shipped    17/0',
-    'processing 20/3',
-    'shipped    17/0',
+    'delivered  17/0',
     'paid       17/0',
   ];
+
+  /**
+   * Puts an order's units back on the shelf, then forgets the order.
+   *
+   * `/dev/forget-order` releases a reserve, so it can only be handed an order
+   * that is still holding one. After a walk that ends in `paid` — or in
+   * `cancelled` — the reserve is already gone, and forgetting it would take
+   * three units off a reservation of nothing and drift the count the other
+   * way. So the shelf is put back to what a holding order implies first.
+   */
+  const restoreAndForget = async (label, id) => {
+    await call(NODE, `/api/admin/products/${productId}/stock`, 'PUT',
+      { levels: [{ warehouseId: warehouse.id, quantity: 20, reserved: 3 }] }, admin);
+    const gone = await call(NET, '/dev/forget-order', 'POST', { orderId: id });
+    line(`${label} order removed`, JSON.stringify(gone.body));
+    return gone;
+  };
 
   // Each API's order is placed, walked and removed before the next one
   // starts, so both see the same shelf rather than one seeing the other's
@@ -228,7 +253,7 @@ try {
     line(`${label} placed`, `${order.body.order.reference} — shelf ${held.quantity}/${held.reserved}`);
 
     const steps = [];
-    for (const status of ['processing', 'shipped', 'processing', 'shipped', 'paid']) {
+    for (const status of ['accepted', 'processing', 'shipped', 'delivered', 'paid']) {
       const r = await call(base, `/api/admin/orders/${id}`, 'PATCH', { status }, admin);
       const s = await shelf();
       steps.push({ status, response: r.body, shelf: `${status.padEnd(10)} ${s.quantity}/${s.reserved}` });
@@ -241,18 +266,53 @@ try {
     if (right) same++;
     line(`${label} shelf moved as expected`, right ? 'yes' : `NO — ${JSON.stringify(steps.map((s) => s.shelf))}`);
 
-    // Back to processing before it goes, so the reserve the probe releases is
-    // one that actually exists. Removing a shipped order would release a
-    // reserve of nothing and drift the count the other way.
-    await call(base, `/api/admin/orders/${id}`, 'PATCH', { status: 'processing' }, admin);
-    const gone = await call(NET, '/dev/forget-order', 'POST', { orderId: id });
-    line(`${label} order removed`, JSON.stringify(gone.body));
+    await restoreAndForget(label, id);
     placed[placed.length - 1].removed = true;
 
     const back = await shelf();
     total++;
     if (back.quantity === 20 && back.reserved === 0) same++;
     line(`${label} shelf back to 20/0`, `${back.quantity}/${back.reserved}`);
+  }
+
+  /* ------------------------------------------- calling an order off --- */
+
+  // The case the old two-state stock code could not express: the goods never
+  // left, so `quantity` is untouched, but the promise against them has to end
+  // or the units stay reserved for an order nobody will ever pick.
+  console.log('\nan order called off, on each API:');
+  for (const [base, label] of [[NODE, 'node  '], [NET, 'dotnet']]) {
+    const order = await call(base, '/api/orders', 'POST', { items: [{ productId, quantity: 3 }] }, retail);
+    if (order.status !== 201) { line(`${label} place`, `FAILED ${JSON.stringify(order.body)}`); continue; }
+    const id = order.body.order.id;
+    placed.push({ base, label: `${label} cancel`, id });
+
+    const held = await shelf();
+    line(`${label} placed`, `shelf ${held.quantity}/${held.reserved}`);
+
+    // Without a reason it is refused, by both APIs, in the same sentence.
+    await both(`${label} cancelled with no reason`,
+      `/api/admin/orders/${id}`, 'PATCH', { status: 'cancelled' }, admin);
+
+    const off = await call(base, `/api/admin/orders/${id}`, 'PATCH',
+      { status: 'cancelled', reason: 'Probe: customer changed their mind' }, admin);
+    const after = await shelf();
+    line(`${label} -> cancelled`, `${off.status} shelf ${after.quantity}/${after.reserved}`);
+
+    total++;
+    // Twenty still on the shelf and nothing promised: the promise ended, the
+    // stock did not move.
+    const released = off.status === 200 && after.quantity === 20 && after.reserved === 0;
+    if (released) same++;
+    line(`${label} promise released, stock untouched`,
+      released ? 'yes' : `NO — ${after.quantity}/${after.reserved}`);
+
+    // And it is finished: nothing moves it afterwards.
+    await both(`${label} cancelled order cannot be revived`,
+      `/api/admin/orders/${id}`, 'PATCH', { status: 'processing' }, admin);
+
+    await restoreAndForget(`${label} cancel`, id);
+    placed[placed.length - 1].removed = true;
   }
 
   // The refusal nobody wants to meet, deliberately arranged. The order holds
@@ -265,6 +325,14 @@ try {
     const id = drift.body.order.id;
     placed.push({ base: NODE, label: 'drift ', id });
 
+    // Walked to `processing` BEFORE the shelf is edited, so that what the
+    // attempt below meets is the stock refusing it rather than the lifecycle:
+    // an order cannot go straight from placed to shipped any more, and a
+    // refusal for the wrong reason would prove nothing about the CHECK.
+    for (const status of ['accepted', 'processing']) {
+      await call(NODE, `/api/admin/orders/${id}`, 'PATCH', { status }, admin);
+    }
+
     await call(NODE, `/api/admin/products/${productId}/stock`, 'PUT',
       { levels: [{ warehouseId: warehouse.id, quantity: 20, reserved: 0 }] }, admin);
     line('shelf edited to', JSON.stringify(await shelf()));
@@ -274,7 +342,7 @@ try {
     const stuck = (await call(NODE, '/api/admin/orders', 'GET', undefined, admin))
       .body.orders.find((o) => o.id === id);
     total++;
-    const held = stuck?.status === 'order_is_sent';
+    const held = stuck?.status === 'processing';
     if (held) same++;
     line('the status did not move', held ? `still ${stuck?.status}` : `NO — now ${stuck?.status}`);
 
@@ -295,7 +363,12 @@ try {
 } finally {
   console.log('\nclean-up:');
   for (const p of placed.filter((x) => !x.removed)) {
-    await call(p.base, `/api/admin/orders/${p.id}`, 'PATCH', { status: 'processing' }, admin);
+    // The shelf is put back to what a holding order implies rather than the
+    // order being walked back to `processing`: an order does not go backwards
+    // any more, and this loop also has to cope with one left mid-walk by a
+    // failure, whose status could be anything.
+    await call(NODE, `/api/admin/products/${productId}/stock`, 'PUT',
+      { levels: [{ warehouseId: warehouse.id, quantity: 20, reserved: 3 }] }, admin);
     const gone = await call(NET, '/dev/forget-order', 'POST', { orderId: p.id });
     line(`${p.label} order removed`, JSON.stringify(gone.body));
   }

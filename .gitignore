@@ -495,3 +495,7 @@ api.log.err
 # Regenerated per change and tied to whatever the database holds that day, so
 # it is evidence for one piece of work rather than a fact about the project.
 tools/search-snapshot.json
+
+# The file transport's outbox. Development only, and it holds whatever was
+# sent — including anything a reset flow would put in a link.
+.mail/

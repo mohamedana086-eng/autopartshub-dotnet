@@ -1,3 +1,4 @@
+using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Pricing;
 
@@ -55,7 +56,7 @@ public static class SearchEndpoints
     {
         app.MapGet("/api/catalog/search", async (
             HttpContext http, SearchQueries queries, SpecQueries specQueries,
-            PricingContextLoader pricing, CancellationToken ct) =>
+            PricingContextLoader pricing, AutoPartsContext db, CancellationToken ct) =>
         {
             var query = http.Request.Query;
             string? Param(string key) =>
@@ -400,6 +401,35 @@ public static class SearchEndpoints
             // not showing without fetching them to find out.
             var rowSpecs = await specQueries.ForAsync(pageIds, SpecQueries.RowSpecs, ct);
             var howManySpecs = await specQueries.CountsAsync(pageIds, ct);
+
+            // A term that found nothing is written down, once the answer is
+            // assembled.
+            //
+            // Only when the search itself came up empty — a fuzzy rescue means
+            // the customer was served and merely mistyped, so recording it
+            // would report a gap in the catalogue that is really a gap in their
+            // spelling.
+            //
+            // `narrowed` says whether anything was selected at the time. It is
+            // what keeps the report honest: "we do not sell this" and "we do
+            // not sell this from that supplier" are different findings, and a
+            // column that could not tell them apart would inflate the first
+            // with instances of the second.
+            //
+            // Awaited, and every failure inside it swallowed — a counter is
+            // not worth an error page. See Catalogue/SearchMisses.cs.
+            if (q.Length > 0 && matches.Count == 0)
+            {
+                // `partType` and `matchIn` are arrays and are never null — an
+                // empty one means nothing was selected, so they are counted by
+                // length. The other API says the same thing the same way.
+                await SearchMisses.RecordAsync(db, q,
+                    narrowed: system is not null || manufacturer is not null || variant is not null
+                        || supplier is not null || reliability is not null || returnsOnly
+                        || minRating is not null || minPrice is not null || maxPrice is not null
+                        || partType.Length > 0 || matchIn.Length > 0,
+                    ct);
+            }
 
             return Results.Ok(new
             {

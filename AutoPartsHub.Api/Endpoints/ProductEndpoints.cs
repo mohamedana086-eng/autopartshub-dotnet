@@ -26,12 +26,18 @@ public static class ProductEndpoints
                        m."name" AS "ManufacturerName",
                        v."name" AS "SystemName", v."slug" AS "SystemSlug",
                        pli."price" AS "ListPrice",
+                       pli."markupPercent" AS "ListRowMarkupPercent",
+                       bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                        st."available" AS "Available",
                        s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating"
                 FROM "Product" p
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
-                LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+                -- The supplier whose offer WON, falling back to the column the part was
+                -- first sourced from. Joined on the same value the pricing chain uses, so
+                -- a row cannot name one supplier while being priced from another's offer.
+                LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
+                LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
                  AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
@@ -46,7 +52,13 @@ public static class ProductEndpoints
                 -- this reads as "no such part" rather than showing a page
                 -- nobody can buy from. Parts with no supplier are the
                 -- catalogue's own and stay.
-                AND (p."supplierId" IS NULL OR s."active")
+                -- A live offer from a live supplier, or no supplier relationship at all.
+                AND (
+                  bo."productId" IS NOT NULL
+                  OR (p."supplierId" IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+                  ))
+                )
                 """).ToListAsync(ct)).FirstOrDefault();
 
             if (product is null) return Results.NotFound(new { error = "Product not found" });
@@ -153,6 +165,11 @@ public record ProductDetailRow(
     string SystemName,
     string SystemSlug,
     double? ListPrice,
+    /// <summary>That line's own margin — the narrowest rung. See IPriceable.</summary>
+    double? ListRowMarkupPercent,
+    /// <summary>The best offer's price and whose it was — see IPriceable.</summary>
+    double? OfferPrice,
+    string? OfferSupplierId,
     int? Available,
     string? SupplierSlug,
     string? SupplierName,

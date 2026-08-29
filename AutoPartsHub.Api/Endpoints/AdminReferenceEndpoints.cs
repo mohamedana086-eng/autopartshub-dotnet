@@ -1,5 +1,6 @@
 using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -35,6 +36,8 @@ public static class AdminReferenceEndpoints
                        s."defaultStockDays" AS "DefaultStockDays",
                        s."purchaseCurrencyId" AS "PurchaseCurrencyId",
                        c."code" AS "PurchaseCurrencyCode",
+                       s."priority" AS "Priority", s."minOrderAmount" AS "MinOrderAmount",
+                       s."markupPercent" AS "MarkupPercent",
                        s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
                        p."count"::int AS "ProductCount"
                 FROM "Supplier" s
@@ -196,9 +199,95 @@ public static class AdminReferenceEndpoints
             return Results.Ok(new { lists = lists.Select(Serialise) });
         });
 
-        // GET /api/admin/price-lists/<id> — the list, with a sample of what is
-        // in it. Enough to check a file landed the way it was meant to; not the
-        // whole thing, which can be tens of thousands of rows.
+        // GET /api/admin/price-lists/imports — the history of uploads, newest
+        // first, optionally narrowed to one list's.
+        //
+        // A literal segment beside {id}, which routing prefers, so this path
+        // reaches here and /price-lists/<id> still reaches the list. Its own
+        // path rather than a child of a list because a refused upload never
+        // produced one, and those are the entries most worth reading.
+        app.MapGet("/api/admin/price-lists/imports", async (
+            HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var query = http.Request.Query;
+            var page = Paging.ReadPage(query["page"]);
+            var pageSize = Paging.ReadPageSize(query["pageSize"], query["limit"]);
+            var priceListId = query["priceListId"].ToString().Trim();
+            if (priceListId.Length == 0) priceListId = null!;
+
+            var (imports, total) = await Imports(db, null, priceListId, page, pageSize, ct);
+
+            return Results.Ok(new
+            {
+                imports = imports.Select(SerialiseImport),
+                total,
+                page,
+                pageSize,
+                pages = Paging.PageCount(total, pageSize),
+            });
+        });
+
+        // GET /api/admin/price-lists/imports/<importId> — one upload, and the
+        // lines of it that did not make it.
+        //
+        // This is the screen the whole log exists for. The accepted rows can
+        // already be read through the list they became; the rejected ones had
+        // nowhere to be read at all, and they are the half that explains why a
+        // part is still on its old price.
+        app.MapGet("/api/admin/price-lists/imports/{importId}", async (
+            string importId, HttpContext http, AdminGate gate, AutoPartsContext db,
+            CancellationToken ct) =>
+        {
+            var g = gate.RequireAdmin(http);
+            if (!g.Ok) return g.Response!;
+
+            var record = (await Imports(db, importId, null, 1, 1, ct)).Rows.FirstOrDefault();
+            if (record is null) return Results.NotFound(new { error = "Import not found." });
+
+            var query = http.Request.Query;
+            var page = Paging.ReadPage(query["page"]);
+            var pageSize = Paging.ReadPageSize(query["pageSize"], query["limit"]);
+
+            var rejected = await db.Database.SqlQuery<RejectedLineRow>($"""
+                SELECT "line" AS "Line", "partNumber" AS "PartNumber", "price" AS "Price",
+                       "currency" AS "Currency", "reason" AS "Reason"
+                FROM "PriceListImportRow"
+                WHERE "importId" = {importId}
+                ORDER BY "line" ASC
+                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                """).ToListAsync(ct);
+
+            var total = (await db.Database.SqlQuery<int>($"""
+                SELECT COUNT(*)::int AS "Value" FROM "PriceListImportRow"
+                WHERE "importId" = {importId}
+                """).ToListAsync(ct)).FirstOrDefault();
+
+            return Results.Ok(new
+            {
+                import = SerialiseImport(record),
+                rejected,
+                // `total` is what can be paged through; the import's own count
+                // is what actually happened. Saying both is the honest answer
+                // for a file that failed more times than the log keeps.
+                total,
+                page,
+                pageSize,
+                pages = Paging.PageCount(total, pageSize),
+                truncated = record.Rejected > record.RejectedStored,
+                storedLimit = Admin.PriceLists.StoredRejections,
+            });
+        });
+
+        // GET /api/admin/price-lists/<id> — the list and its lines, a page at a
+        // time.
+        //
+        // Paged rather than sampled. A fixed cap answered "did the file land
+        // the way it was meant to" and no other question: a list of forty
+        // thousand parts showed two hundred of them and the rest could not be
+        // reached from here at all.
         app.MapGet("/api/admin/price-lists/{id}", async (
             string id, HttpContext http, AdminGate gate, AutoPartsContext db, CancellationToken ct) =>
         {
@@ -208,20 +297,38 @@ public static class AdminReferenceEndpoints
             var list = (await PriceLists(db, id, ct)).FirstOrDefault();
             if (list is null) return Results.NotFound(new { error = "Price list not found." });
 
-            const int ItemPage = 200;
+            var query = http.Request.Query;
+            var page = Paging.ReadPage(query["page"]);
+            var pageSize = Paging.ReadPageSize(query["pageSize"], query["limit"]);
+
             var items = await db.Database.SqlQuery<PriceListLineRow>($"""
                 SELECT i."productId" AS "ProductId", p."partNumber" AS "PartNumber",
                        p."name" AS "Name", i."price" AS "Price",
                        i."sourcePrice" AS "SourcePrice", i."sourceCurrency" AS "SourceCurrency",
+                       i."sourcePartNumber" AS "SourcePartNumber",
+                       i."markupPercent" AS "MarkupPercent",
                        p."basePrice" AS "BasePrice"
                 FROM "PriceListItem" i
                 JOIN "Product" p ON p."id" = i."productId"
                 WHERE i."priceListId" = {id}
                 ORDER BY p."partNumber" ASC
-                LIMIT {ItemPage}
+                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
                 """).ToListAsync(ct);
 
-            return Results.Ok(new { list = Serialise(list), shown = items.Count, items });
+            var total = (await db.Database.SqlQuery<int>($"""
+                SELECT COUNT(*)::int AS "Value" FROM "PriceListItem" WHERE "priceListId" = {id}
+                """).ToListAsync(ct)).FirstOrDefault();
+
+            return Results.Ok(new
+            {
+                list = Serialise(list),
+                items,
+                shown = items.Count,
+                total,
+                page,
+                pageSize,
+                pages = Paging.PageCount(total, pageSize),
+            });
         });
 
         // GET /api/admin/clients — every account, plus the tiers they can be
@@ -282,6 +389,7 @@ public static class AdminReferenceEndpoints
         db.Database.SqlQuery<PriceListRow>($"""
             SELECT l."id" AS "Id", l."name" AS "Name", l."description" AS "Description",
                    l."active" AS "Active", l."sourceName" AS "SourceName",
+                   l."markupPercent" AS "MarkupPercent",
                    n."count"::int AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
@@ -299,9 +407,68 @@ public static class AdminReferenceEndpoints
         description = l.Description,
         active = l.Active,
         sourceName = l.SourceName,
+        markupPercent = l.MarkupPercent,
         itemCount = l.ItemCount,
         createdAt = Timestamps.Iso(l.CreatedAt),
         updatedAt = Timestamps.Iso(l.UpdatedAt),
+    };
+
+    /// <summary>
+    /// Uploads, newest first, with the total behind the page.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="id"/> and <paramref name="priceListId"/> are both
+    /// optional and mean different things: one import, or every import of one
+    /// list. Passing neither reads the whole history, which is the screen this
+    /// exists for.
+    /// </remarks>
+    private static async Task<(List<PriceListImportSummary> Rows, int Total)> Imports(
+        AutoPartsContext db, string? id, string? priceListId, int page, int pageSize,
+        CancellationToken ct)
+    {
+        var rows = await db.Database.SqlQuery<PriceListImportSummary>($"""
+            SELECT i."id" AS "Id", i."priceListId" AS "PriceListId", i."listName" AS "ListName",
+                   i."sourceName" AS "SourceName", i."uploadedById" AS "UploadedById",
+                   i."uploadedByName" AS "UploadedByName", i."outcome" AS "Outcome",
+                   i."rowsSent" AS "RowsSent", i."accepted" AS "Accepted",
+                   i."rejected" AS "Rejected", i."rejectedStored" AS "RejectedStored",
+                   i."error" AS "Error", i."createdAt" AS "CreatedAt",
+                   COALESCE(l."active", FALSE) AS "ListActive"
+            FROM "PriceListImport" i
+            LEFT JOIN "PriceList" l ON l."id" = i."priceListId"
+            WHERE ({id}::text IS NULL OR i."id" = {id})
+              AND ({priceListId}::text IS NULL OR i."priceListId" = {priceListId})
+            ORDER BY i."createdAt" DESC
+            LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+            """).ToListAsync(ct);
+
+        var total = (await db.Database.SqlQuery<int>($"""
+            SELECT COUNT(*)::int AS "Value" FROM "PriceListImport" i
+            WHERE ({id}::text IS NULL OR i."id" = {id})
+              AND ({priceListId}::text IS NULL OR i."priceListId" = {priceListId})
+            """).ToListAsync(ct)).FirstOrDefault();
+
+        return (rows, total);
+    }
+
+    private static object SerialiseImport(PriceListImportSummary i) => new
+    {
+        id = i.Id,
+        priceListId = i.PriceListId,
+        listName = i.ListName,
+        sourceName = i.SourceName,
+        uploadedById = i.UploadedById,
+        uploadedByName = i.UploadedByName,
+        outcome = i.Outcome,
+        rowsSent = i.RowsSent,
+        accepted = i.Accepted,
+        rejected = i.Rejected,
+        // What can actually be read back, as against what happened. They differ
+        // only where a file failed more times than the log keeps.
+        rejectedStored = i.RejectedStored,
+        error = i.Error,
+        listActive = i.ListActive,
+        createdAt = Timestamps.Iso(i.CreatedAt),
     };
 }
 
@@ -321,6 +488,12 @@ public record AdminSupplierRow(
     string Id, string Code, string Slug, string Name, string? Description, string Reliability,
     int? Rating, bool? AcceptsReturns, string? Country, int? GuaranteeMonths,
     int? DefaultStockDays, string? PurchaseCurrencyId, string? PurchaseCurrencyCode,
+    /// <summary>Which supplier to prefer when several offer a part, higher winning.</summary>
+    int Priority,
+    /// <summary>The least they will take an order for. Zero means no minimum.</summary>
+    double MinOrderAmount,
+    /// <summary>The margin their parts earn, or null where none is agreed.</summary>
+    double? MarkupPercent,
     bool Active, string? ApprovedAt, int ProductCount);
 
 public record AdminWarehouseRow(
@@ -339,12 +512,42 @@ public record AdminCategoryRow(
 
 public record PriceListRow(
     string Id, string Name, string? Description, bool Active, string? SourceName,
+    /// <summary>The margin everything on it earns, or null where it states none.</summary>
+    double? MarkupPercent,
     int ItemCount, DateTime CreatedAt, DateTime UpdatedAt);
 
+/// <param name="SourcePartNumber">The supplier's own number, where the row was matched through it.</param>
 /// <param name="BasePrice">What the part costs without this list, so the change is visible.</param>
 public record PriceListLineRow(
     string ProductId, string PartNumber, string Name, double Price,
-    double? SourcePrice, string? SourceCurrency, double BasePrice);
+    double? SourcePrice, string? SourceCurrency, string? SourcePartNumber,
+    /// <summary>
+    /// This line's own margin, or null where it states none. The narrowest
+    /// rung of the purchase-side chain, and the only per-part one. Null falls
+    /// through to the list, then the supplier — it is not the same as zero,
+    /// which sells this part at cost and stops the search.
+    /// </summary>
+    double? MarkupPercent,
+    double BasePrice);
+
+/// <summary>One upload, as the history lists it.</summary>
+/// <remarks>
+/// Not <c>PriceListImportRow</c>, which every other query row here would be
+/// called: that is the name of the TABLE holding the rejected lines, and a
+/// type by that name would mean the opposite of what the table does. It shares
+/// its name with the other API's type instead.
+/// </remarks>
+/// <param name="PriceListId">Null when the file was refused, or its list has since been deleted.</param>
+/// <param name="RejectedStored">How many of <paramref name="Rejected"/> can be read back.</param>
+/// <param name="ListActive">Whether the list this made is the one setting prices right now.</param>
+public record PriceListImportSummary(
+    string Id, string? PriceListId, string ListName, string? SourceName,
+    string? UploadedById, string UploadedByName, string Outcome,
+    int RowsSent, int Accepted, int Rejected, int RejectedStored,
+    string? Error, DateTime CreatedAt, bool ListActive);
+
+/// <summary>One line of an upload that did not make it, as stored.</summary>
+public record RejectedLineRow(int Line, string PartNumber, string Price, string? Currency, string Reason);
 
 public record AdminClientRow(
     string Id, string Name, string Email, string Role, string? City, bool HasLogin,

@@ -85,6 +85,8 @@ public sealed class SearchQueries(AutoPartsContext db)
                    m."name" AS "ManufacturerName",
                    v."name" AS "SystemName", v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
+                   pli."markupPercent" AS "ListRowMarkupPercent",
+                   bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    img."url" AS "ImageUrl", img."alt" AS "ImageAlt",
                    st."available" AS "Available",
                    s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating",
@@ -92,7 +94,11 @@ public sealed class SearchQueries(AutoPartsContext db)
             FROM "Product" p
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
             JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
-            LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+            -- The supplier whose offer WON, falling back to the column the part was
+            -- first sourced from. Joined on the same value the pricing chain uses, so
+            -- a row cannot name one supplier while being priced from another's offer.
+            LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
+            LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
              AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
@@ -136,13 +142,27 @@ public sealed class SearchQueries(AutoPartsContext db)
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
-            AND ({supplier}::text IS NULL OR s."slug" = {supplier})
+            -- "Their parts" means the parts they OFFER, not the ones their offer
+            -- happens to win. A supplier page listing only what we currently buy from
+            -- them would hide half their range the day somebody undercut them.
+            AND ({supplier}::text IS NULL OR EXISTS (
+              SELECT 1 FROM "SupplierOffer" so
+              JOIN "Supplier" ss ON ss."id" = so."supplierId"
+              WHERE so."productId" = p."id" AND so."active" AND ss."active"
+                AND ss."slug" = {supplier}
+            ))
             -- A supplier who is switched off is not selling, so their parts
             -- leave the catalogue entirely. That is what lets one sign up,
             -- load a whole range and price it, and have none of it on sale
             -- until an admin approves them. Parts with no supplier at all are
             -- the catalogue's own and stay.
-            AND (p."supplierId" IS NULL OR s."active")
+            -- A live offer from a live supplier, or no supplier relationship at all.
+            AND (
+              bo."productId" IS NOT NULL
+              OR (p."supplierId" IS NULL AND NOT EXISTS (
+                SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+              ))
+            )
             -- The row filters. Each cancels itself when its parameter is null,
             -- so every combination is the same statement with the same holes.
             AND ({system}::text IS NULL OR v."slug" = {system})
@@ -205,7 +225,11 @@ public sealed class SearchQueries(AutoPartsContext db)
               FROM "Product" p
               JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
               JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
-              LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+              -- The supplier whose offer WON, falling back to the column the part was
+              -- first sourced from. Joined on the same value the pricing chain uses, so
+              -- a row cannot name one supplier while being priced from another's offer.
+              LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
+              LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
               WHERE (
                 {hasQuery}::bool IS NOT TRUE
                 OR p."id" = ANY({ids}::text[])
@@ -227,8 +251,22 @@ public sealed class SearchQueries(AutoPartsContext db)
                 SELECT 1 FROM "Fitment" fit
                 WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
               ))
-              AND ({supplier}::text IS NULL OR s."slug" = {supplier})
-              AND (p."supplierId" IS NULL OR s."active")
+              -- "Their parts" means the parts they OFFER, not the ones their offer
+              -- happens to win. A supplier page listing only what we currently buy from
+              -- them would hide half their range the day somebody undercut them.
+              AND ({supplier}::text IS NULL OR EXISTS (
+                SELECT 1 FROM "SupplierOffer" so
+                JOIN "Supplier" ss ON ss."id" = so."supplierId"
+                WHERE so."productId" = p."id" AND so."active" AND ss."active"
+                  AND ss."slug" = {supplier}
+              ))
+              -- A live offer from a live supplier, or no supplier relationship at all.
+              AND (
+                bo."productId" IS NOT NULL
+                OR (p."supplierId" IS NULL AND NOT EXISTS (
+                  SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+                ))
+              )
             ),
             in_system AS (
               SELECT * FROM matched WHERE ({system}::text IS NULL OR "systemSlug" = {system})
@@ -278,6 +316,8 @@ public sealed class SearchQueries(AutoPartsContext db)
                    m."name" AS "ManufacturerName",
                    v."name" AS "SystemName", v."slug" AS "SystemSlug",
                    pli."price" AS "ListPrice",
+                   pli."markupPercent" AS "ListRowMarkupPercent",
+                   bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    img."url" AS "ImageUrl", img."alt" AS "ImageAlt",
                    st."available" AS "Available",
                    s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating",
@@ -285,7 +325,11 @@ public sealed class SearchQueries(AutoPartsContext db)
             FROM "Product" p
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
             JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
-            LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
+            -- The supplier whose offer WON, falling back to the column the part was
+            -- first sourced from. Joined on the same value the pricing chain uses, so
+            -- a row cannot name one supplier while being priced from another's offer.
+            LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
+            LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
              AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
@@ -307,11 +351,25 @@ public sealed class SearchQueries(AutoPartsContext db)
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
-            AND ({supplier}::text IS NULL OR s."slug" = {supplier})
+            -- "Their parts" means the parts they OFFER, not the ones their offer
+            -- happens to win. A supplier page listing only what we currently buy from
+            -- them would hide half their range the day somebody undercut them.
+            AND ({supplier}::text IS NULL OR EXISTS (
+              SELECT 1 FROM "SupplierOffer" so
+              JOIN "Supplier" ss ON ss."id" = so."supplierId"
+              WHERE so."productId" = p."id" AND so."active" AND ss."active"
+                AND ss."slug" = {supplier}
+            ))
             -- Same rule as the search above. Reached by id rather than by
             -- matching, which is exactly why it has to be repeated: a fuzzy
             -- match that skipped the check would be a way round it.
-            AND (p."supplierId" IS NULL OR s."active")
+            -- A live offer from a live supplier, or no supplier relationship at all.
+            AND (
+              bo."productId" IS NOT NULL
+              OR (p."supplierId" IS NULL AND NOT EXISTS (
+                SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+              ))
+            )
             """).ToListAsync(ct);
     }
 
@@ -447,6 +505,11 @@ public record SearchRow(
     string SystemName,
     string SystemSlug,
     double? ListPrice,
+    /// <summary>That line's own margin — the narrowest rung. See IPriceable.</summary>
+    double? ListRowMarkupPercent,
+    /// <summary>The best offer's price and whose it was — see IPriceable.</summary>
+    double? OfferPrice,
+    string? OfferSupplierId,
     string? ImageUrl,
     string? ImageAlt,
     int? Available,
@@ -520,6 +583,11 @@ public record CountedSearchRow(
     string SystemName,
     string SystemSlug,
     double? ListPrice,
+    /// <summary>That line's own margin — the narrowest rung. See IPriceable.</summary>
+    double? ListRowMarkupPercent,
+    /// <summary>The best offer's price and whose it was — see IPriceable.</summary>
+    double? OfferPrice,
+    string? OfferSupplierId,
     string? ImageUrl,
     string? ImageAlt,
     int? Available,
@@ -532,7 +600,9 @@ public record CountedSearchRow(
     public SearchRow ToRow() => new(
         Id, PartNumber, Name, Description, StockDays, BasePrice, SupplierId, PartType,
         PackagingUnit, QuantityPerPackage, GoodsCategoryId, WeightGrams,
-        ManufacturerName, SystemName, SystemSlug, ListPrice, ImageUrl, ImageAlt, Available,
+        ManufacturerName, SystemName, SystemSlug, ListPrice, ListRowMarkupPercent,
+        OfferPrice, OfferSupplierId,
+        ImageUrl, ImageAlt, Available,
         SupplierSlug, SupplierName, SupplierRating, SupplierReliability, SupplierAcceptsReturns);
 }
 

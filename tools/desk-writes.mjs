@@ -45,15 +45,35 @@ const line = (label, detail) => console.log(`  ${label.padEnd(38)} ${detail}`);
 
 let same = 0, total = 0;
 
+/**
+ * Neutralises the one field two APIs cannot agree on and should not have to.
+ *
+ * `importId` is the id of the log row an upload writes down. It is minted per
+ * request, so it is a fresh value on each side by construction, and comparing
+ * it would fail every refusal for the one reason that is not a difference.
+ *
+ * It is flattened rather than dropped, so what IS still compared is that both
+ * sides send the field and both send a real id: an API that recorded nothing
+ * answers null here, and null against "<id>" is a mismatch, which is exactly
+ * what it should be.
+ */
+const settle = (body) => {
+  if (!body || typeof body !== 'object') return body;
+  const copy = { ...body };
+  if ('importId' in copy) copy.importId = copy.importId === null ? null : '<id>';
+  return copy;
+};
+
 /** Sends the same request to both and compares status and body exactly. */
 const both = async (label, path, method, body) => {
   total++;
   const [a, b] = await Promise.all([call(NODE, path, method, body), call(NET, path, method, body)]);
-  const match = a.status === b.status && JSON.stringify(a.body) === JSON.stringify(b.body);
+  const match = a.status === b.status
+    && JSON.stringify(settle(a.body)) === JSON.stringify(settle(b.body));
   if (match) same++;
   line(label, match
-    ? `both ${a.status} ${JSON.stringify(a.body).slice(0, 60)}`
-    : `node ${a.status} ${JSON.stringify(a.body).slice(0, 42)} | dotnet ${b.status} ${JSON.stringify(b.body).slice(0, 42)}`);
+    ? `both ${a.status} ${JSON.stringify(settle(a.body)).slice(0, 60)}`
+    : `node ${a.status} ${JSON.stringify(settle(a.body)).slice(0, 42)} | dotnet ${b.status} ${JSON.stringify(settle(b.body)).slice(0, 42)}`);
   return [a, b];
 };
 
@@ -104,6 +124,38 @@ await both('unknown currency on every row', '/api/admin/price-lists', 'POST',
   { name: 'ZZ probe', rows: [{ partNumber: p1.partNumber, price: 1, currency: 'ZZQ' }] });
 await both('patch an unknown list', '/api/admin/price-lists/nope', 'PATCH', { name: 'X' });
 await both('delete an unknown list', '/api/admin/price-lists/nope', 'DELETE');
+
+// The price guard: a file that moves nearly every price by an absurd multiple
+// is what a mis-mapped column looks like, and both APIs have to refuse it with
+// the same sentence and the same figures — the refusal is shown to an admin
+// and written into the import log, so a difference here is a difference in
+// what the business is told.
+//
+// Below twenty comparable rows the guard deliberately does not fire, so this
+// only runs where the catalogue can supply them. Nothing is written either
+// way: a refused upload creates no list.
+const GUARD_ROWS = 25;
+if (products.length >= GUARD_ROWS) {
+  await both('every price absurdly higher', '/api/admin/price-lists', 'POST', {
+    name: 'ZZ probe', rows: products.slice(0, GUARD_ROWS)
+      .map((p) => ({ partNumber: p.partNumber, price: 999999 })),
+  });
+  // The same file, sent by somebody who has seen the numbers and means it.
+  // It has to go through — and then be taken straight back out.
+  for (const [base, label] of [[NODE, 'node  '], [NET, 'dotnet']]) {
+    const forced = await call(base, '/api/admin/price-lists', 'POST', {
+      name: 'ZZ probe forced', rows: products.slice(0, GUARD_ROWS)
+        .map((p) => ({ partNumber: p.partNumber, price: 999999 })),
+      confirmLargeChange: true,
+    });
+    line(`${label} guard overridden`, `${forced.status} accepted ${forced.body?.accepted}`);
+    if (forced.status === 201) {
+      await call(base, `/api/admin/price-lists/${forced.body.list.id}`, 'DELETE');
+    }
+  }
+} else {
+  line('price guard', `skipped — needs ${GUARD_ROWS} parts, catalogue has ${products.length}`);
+}
 
 /* ------------------------------------------------- price lists, uploaded --- */
 
@@ -163,6 +215,14 @@ const upload = async (base, label) => {
   const gone = await call(base, `/api/admin/price-lists/${id}`, 'DELETE');
   line(`${label} delete`, `${gone.status} ${JSON.stringify(gone.body)}`);
 
+  // The log entry, read AFTER the list was deleted — which is the half of the
+  // design worth proving. Deleting a list nulls the import's `priceListId` and
+  // leaves the entry standing, so this both reads back the rejected lines and
+  // shows that housekeeping on the catalogue did not erase the record of who
+  // repriced it.
+  const logged = await call(base, `/api/admin/price-lists/imports/${made.body.importId}`, 'GET');
+  line(`${label} log after delete`, `${logged.status} ${logged.body?.total} rejected lines kept`);
+
   return {
     accepted: made.body.accepted,
     rejectedCount: made.body.rejectedCount,
@@ -173,6 +233,12 @@ const upload = async (base, label) => {
     activated: on.body.list,
     refusal: refused,
     deactivated: off.body.list,
+    log: logged.body,
+    // What the file would do to the prices already in force. Both APIs upload
+    // the same rows against the same database, and the first one's list
+    // arrives switched OFF — so the second sees the same baseline and must
+    // report the same movement, down to the part it names as steepest.
+    movement: made.body.movement,
   };
 };
 
@@ -182,9 +248,15 @@ const activeBefore = (await call(NODE, '/api/admin/price-lists', 'GET')).body.li
 const a = await upload(NODE, 'node  ');
 const b = await upload(NET, 'dotnet');
 
-/** Ids and timestamps differ by construction; everything else must not. */
+/**
+ * Ids and timestamps differ by construction; everything else must not.
+ *
+ * `priceListId` joins them: each API uploaded its own list, so the import log
+ * points at a different one on each side. `uploadedById` deliberately does
+ * NOT — both signed in as the same admin, so that one is a real assertion.
+ */
 const scrub = (v) => JSON.parse(JSON.stringify(v ?? null, (k, x) =>
-  k === 'id' || k === 'createdAt' || k === 'updatedAt' ? undefined : x));
+  k === 'id' || k === 'priceListId' || k === 'createdAt' || k === 'updatedAt' ? undefined : x));
 
 total++;
 const uploadsMatch = JSON.stringify(scrub(a)) === JSON.stringify(scrub(b));

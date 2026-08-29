@@ -44,10 +44,12 @@ public static class AdminSiteWriteEndpoints
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "Supplier" ("id", "name", "code", "slug", "description", "reliability",
                                         "rating", "acceptsReturns", "country", "guaranteeMonths",
-                                        "defaultStockDays", "purchaseCurrencyId")
+                                        "defaultStockDays", "purchaseCurrencyId",
+                                        "priority", "minOrderAmount", "markupPercent")
                 VALUES ({id}, {s.Name}, {s.Code}, {s.Slug}, {s.Description}, {s.Reliability},
                         {s.Rating}, {s.AcceptsReturns}, {s.Country}, {s.GuaranteeMonths},
-                        {s.DefaultStockDays}, {s.PurchaseCurrencyId})
+                        {s.DefaultStockDays}, {s.PurchaseCurrencyId},
+                        {s.Priority}, {s.MinOrderAmount}, {s.MarkupPercent})
                 """, ct);
 
             return Results.Json(new { supplier = await SupplierById(db, id, ct) }, statusCode: 201);
@@ -128,7 +130,17 @@ public static class AdminSiteWriteEndpoints
                        "rating" = {s.Rating}, "acceptsReturns" = {s.AcceptsReturns},
                        "country" = {s.Country}, "guaranteeMonths" = {s.GuaranteeMonths},
                        "defaultStockDays" = {s.DefaultStockDays},
-                       "purchaseCurrencyId" = {s.PurchaseCurrencyId}
+                       "purchaseCurrencyId" = {s.PurchaseCurrencyId},
+                       -- These three were on the INSERT and missing here, which
+                       -- meant the editor could set them once and never change
+                       -- them: creating a supplier kept them, saving one
+                       -- afterwards quietly put them back. A create/update pair
+                       -- writing different sets of columns is the shape of that
+                       -- bug, and SupplierWriteColumns in PurchaseMarkupTests
+                       -- now compares the two.
+                       "priority" = {s.Priority},
+                       "minOrderAmount" = {s.MinOrderAmount},
+                       "markupPercent" = {s.MarkupPercent}
                  WHERE "id" = {id}
                 """, ct);
 
@@ -386,6 +398,8 @@ public static class AdminSiteWriteEndpoints
                    s."defaultStockDays" AS "DefaultStockDays",
                    s."purchaseCurrencyId" AS "PurchaseCurrencyId",
                    c."code" AS "PurchaseCurrencyCode",
+                   s."priority" AS "Priority", s."minOrderAmount" AS "MinOrderAmount",
+                   s."markupPercent" AS "MarkupPercent",
                    s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
                    p."count"::int AS "ProductCount"
             FROM "Supplier" s

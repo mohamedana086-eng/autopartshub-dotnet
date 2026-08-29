@@ -146,10 +146,13 @@ public static class OrderEndpoints
                        p."goodsCategoryId" AS "GoodsCategoryId",
                        p."weightGrams" AS "WeightGrams", p."partType" AS "PartType",
                        m."name" AS "ManufacturerName", v."slug" AS "SystemSlug",
-                       pli."price" AS "ListPrice"
+                       pli."price" AS "ListPrice",
+                       pli."markupPercent" AS "ListRowMarkupPercent",
+                       bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId"
                 FROM "Product" p
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
+                LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
                  AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
@@ -159,9 +162,16 @@ public static class OrderEndpoints
                 -- caller already compares this count against what was asked
                 -- for and answers "a part in your cart is no longer in the
                 -- catalogue", which is exactly the case.
-                AND (p."supplierId" IS NULL OR EXISTS (
-                  SELECT 1 FROM "Supplier" s WHERE s."id" = p."supplierId" AND s."active"
-                ))
+                -- A part stays sellable while somebody will actually sell it to us: a live
+                -- offer from a live supplier, or no supplier relationship at all. What goes
+                -- is a part whose every supplier is switched off or whose every offer has
+                -- been withdrawn.
+                AND (
+                  bo."productId" IS NOT NULL
+                  OR (p."supplierId" IS NULL AND NOT EXISTS (
+                    SELECT 1 FROM "SupplierOffer" so WHERE so."productId" = p."id"
+                  ))
+                )
                 """).ToListAsync(ct);
 
             if (products.Count != wanted.Count)
@@ -382,7 +392,12 @@ public record PriceableProductRow(
     string PartType,
     string ManufacturerName,
     string SystemSlug,
-    double? ListPrice) : IPriceable;
+    double? ListPrice,
+    /// <summary>That line's own margin — the narrowest rung. See IPriceable.</summary>
+    double? ListRowMarkupPercent,
+    /// <summary>The best offer's price and whose it was — see IPriceable.</summary>
+    double? OfferPrice,
+    string? OfferSupplierId) : IPriceable;
 
 public class OutOfStockException(Shortfall shortfall) : Exception
 {

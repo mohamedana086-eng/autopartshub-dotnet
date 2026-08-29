@@ -71,6 +71,13 @@ builder.Services.AddScoped<SpecQueries>();
 builder.Services.AddScoped<AutoPartsHub.Api.Vehicles.VehicleFinder>();
 builder.Services.AddScoped<BarcodeQueries>();
 builder.Services.AddSingleton<AdminGate>();
+// The mailer. Singleton because it holds nothing but a logger, and because
+// what it writes — a line in an outbox, or a line in the log saying why not —
+// has nothing per-request about it.
+builder.Services.AddSingleton<AutoPartsHub.Api.Mail.Mailer>();
+// Scoped, not singleton: unlike AdminGate it reads the database, so it takes
+// the request's DbContext.
+builder.Services.AddScoped<SupplierGate>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
@@ -147,6 +154,9 @@ app.MapAdminPricingWriteEndpoints();
 app.MapAdminPriceListWriteEndpoints();
 app.MapAdminCatalogueWriteEndpoints();
 app.MapAdminDeskWriteEndpoints();
+app.MapSupplierPortalEndpoints();
+app.MapTicketEndpoints();
+app.MapAdminOfferEndpoints();
 app.MapAdminOrderWriteEndpoints();
 
 app.Run();

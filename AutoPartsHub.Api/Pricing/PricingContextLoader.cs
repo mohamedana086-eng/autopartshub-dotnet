@@ -116,9 +116,29 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         // Which purchase price list is in force, so a rule can apply only while
         // a particular one is. At most one is active, which the database
         // enforces with a partial unique index.
-        var activeListId = (await db.Database.SqlQuery<string>($"""
-            SELECT "id" AS "Value" FROM "PriceList" WHERE "active" LIMIT 1
+        //
+        // Its name and margin come back with the id: the margin is the middle
+        // rung of the purchase-side chain, and the name is what a quote says
+        // when that rung decides the price.
+        var activeList = (await db.Database.SqlQuery<ActiveListRow>($"""
+            SELECT "id" AS "Id", "name" AS "Name", "markupPercent" AS "MarkupPercent"
+            FROM "PriceList" WHERE "active" LIMIT 1
             """).ToListAsync(ct)).FirstOrDefault();
+
+        // The suppliers that state a margin, as a lookup for the same reason
+        // the goods categories are one: which supplier a part comes from is
+        // already on its row, and there are a few hundred suppliers against
+        // tens of thousands of parts. A join would have to be added to all six
+        // queries that price a row, and one of them forgetting it is exactly
+        // the silent-wrong-price failure the BestOffer join test exists for.
+        var supplierMarkupRows = await db.Database.SqlQuery<SupplierMarkupRow>($"""
+            SELECT "id" AS "Id", "name" AS "Name", "markupPercent" AS "MarkupPercent"
+            FROM "Supplier"
+            WHERE "markupPercent" IS NOT NULL
+            """).ToListAsync(ct);
+
+        var supplierMarkups = supplierMarkupRows.ToDictionary(
+            s => s.Id, s => (s.Name, s.MarkupPercent), StringComparer.Ordinal);
 
         // The goods categories that price something, as a lookup rather than a
         // join on every priceable query.
@@ -160,7 +180,10 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             ClientRole: account?.ClientRole,
             SalesManagerId: account?.SalesManagerId,
             City: account?.City,
-            PriceListId: activeListId);
+            PriceListId: activeList?.Id,
+            PriceListName: activeList?.Name,
+            PriceListMarkupPercent: activeList?.MarkupPercent,
+            SupplierMarkups: supplierMarkups);
     }
 
     /// <summary>
@@ -191,6 +214,12 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
 
     private record GoodsCategoryMarkupRow(
         string Id, string Name, string MarkupType, double MarkupValue, double? MarkupMinAmount);
+
+    /// <summary>The list in force, with the margin it states.</summary>
+    private record ActiveListRow(string Id, string Name, double? MarkupPercent);
+
+    /// <summary>One supplier who has stated a margin.</summary>
+    private record SupplierMarkupRow(string Id, string Name, double MarkupPercent);
 
     private record AccountRow(
         double? DiscountPercent,
@@ -227,7 +256,18 @@ public record RequestPricing(
     string? SalesManagerId = null,
     string? City = null,
     /// <summary>The purchase price list in force, or null when none is.</summary>
-    string? PriceListId = null)
+    string? PriceListId = null,
+    /// <summary>
+    /// That list's name and its own margin — the middle rung of the chain a
+    /// bought part's markup comes down. Both null when no list is active.
+    /// </summary>
+    string? PriceListName = null,
+    double? PriceListMarkupPercent = null,
+    /// <summary>
+    /// The suppliers that state a margin, by id — the bottom rung of that
+    /// chain. A lookup for the same reason GoodsCategoryMarkups is one.
+    /// </summary>
+    Dictionary<string, (string Name, double MarkupPercent)>? SupplierMarkups = null)
 {
     /// <summary>
     /// Prices one row, or null when there is no tier to price against — which
@@ -239,10 +279,13 @@ public record RequestPricing(
 
         return PricingEngine.Resolve(new PricingContext(
             BasePrice: PurchasePrice(row),
-            // The part's own supplier. This was once whichever supplier the
-            // table happened to return first, which made every supplier markup
-            // rule either dead or catalogue-wide depending on row order.
-            SupplierId: row.SupplierId ?? "",
+            // Whose offer won, where one did. This was once whichever supplier
+            // the table happened to return first, which made every supplier
+            // markup rule either dead or catalogue-wide depending on row order;
+            // then it was the part's single supplier column; now a part can
+            // have several and the BestOffer view names the one we would
+            // actually buy from.
+            SupplierId: SupplierIdFor(row),
             ManufacturerName: row.ManufacturerName,
             VehicleSystemSlug: row.SystemSlug,
             PartNumber: row.PartNumber,
@@ -257,6 +300,18 @@ public record RequestPricing(
             GoodsCategoryMarkup: row.GoodsCategoryId is null
                 ? null
                 : GoodsCategoryMarkups.GetValueOrDefault(row.GoodsCategoryId),
+            // The buying side's own chain, resolved before the engine sees it.
+            // The supplier looked up is the one SupplierIdFor names — whose
+            // offer won — so the margin follows the part to whoever we would
+            // actually buy it from today, rather than to whoever first
+            // supplied it.
+            PurchaseMarkup: PurchaseMarkups.Of(new PurchaseMarkupSource(
+                ListPrice: row.ListPrice,
+                RowMarkupPercent: row.ListRowMarkupPercent,
+                ListMarkupPercent: PriceListMarkupPercent,
+                ListName: PriceListName,
+                SupplierMarkupPercent: SupplierMarkupFor(row)?.MarkupPercent,
+                SupplierName: SupplierMarkupFor(row)?.Name)),
             // The clock, read once per priced row rather than inside the
             // engine, so the engine stays a pure function of what it is handed.
             NowMs: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -270,10 +325,53 @@ public record RequestPricing(
     }
 
     /// <summary>
-    /// What the part cost to buy: the active price list's figure where one
-    /// covers it, the part's own price where none does.
+    /// The margin of the supplier this part would actually be bought from.
     /// </summary>
-    public static double PurchasePrice(IPriceable row) => row.ListPrice ?? row.BasePrice;
+    /// <remarks>
+    /// Null when nobody has stated one for them, which is the state every
+    /// supplier is in until an admin types a number into the field.
+    /// </remarks>
+    private (string Name, double MarkupPercent)? SupplierMarkupFor(IPriceable row)
+    {
+        if (SupplierMarkups is null) return null;
+
+        return SupplierMarkups.TryGetValue(SupplierIdFor(row), out var found) ? found : null;
+    }
+
+    /// <summary>
+    /// What the part cost to buy.
+    /// </summary>
+    /// <remarks>
+    /// Three rungs, most specific first:
+    ///
+    /// <list type="number">
+    ///   <item>the ACTIVE PRICE LIST, where it covers this part — a figure
+    ///         somebody uploaded against a dated file from a named supplier,
+    ///         which is the most deliberate answer there is</item>
+    ///   <item>the BEST OFFER, where a supplier offers the part — standing
+    ///         terms rather than a quarter's file</item>
+    ///   <item><c>basePrice</c>, the part's own stored cost</item>
+    /// </list>
+    ///
+    /// The order is the interesting part. A price list is deliberately ABOVE a
+    /// standing offer, because uploading one is the act of saying "these are
+    /// the prices now" — and a list that could be silently outranked by an
+    /// offer nobody looked at would make that act meaningless.
+    /// </remarks>
+    public static double PurchasePrice(IPriceable row) =>
+        row.ListPrice ?? row.OfferPrice ?? row.BasePrice;
+
+    /// <summary>
+    /// Which supplier the markup rules should treat this part as coming from.
+    /// </summary>
+    /// <remarks>
+    /// The one whose offer won, where there is one. Falling back to the part's
+    /// own column keeps a part with no offers behaving as it did — and that
+    /// column is the supplier it was first sourced from, which is the only
+    /// answer available when nobody has offered it since.
+    /// </remarks>
+    public static string SupplierIdFor(IPriceable row) =>
+        row.OfferSupplierId ?? row.SupplierId ?? "";
 }
 
 /// <summary>A row with enough on it to be priced. Flat, because a join returns columns.</summary>
@@ -285,6 +383,39 @@ public interface IPriceable
     string ManufacturerName { get; }
     string SystemSlug { get; }
     double? ListPrice { get; }
+
+    /// <summary>
+    /// That same line's own margin, or null where it states none.
+    /// </summary>
+    /// <remarks>
+    /// Per-row, and so on the row rather than in a lookup: it is the one rung
+    /// of the purchase-side chain that differs from part to part. It comes off
+    /// the same PriceListItem join that produces <c>ListPrice</c>, which is
+    /// what keeps the margin and the cost from disagreeing about whether the
+    /// file covers this part.
+    /// </remarks>
+    double? ListRowMarkupPercent { get; }
+
+    /// <summary>
+    /// What the best supplier offer charges, or null where none offers it.
+    /// </summary>
+    /// <remarks>
+    /// A part can be bought from several suppliers. Which of their offers is
+    /// "best" is decided in one place — the <c>BestOffer</c> view — rather than
+    /// by the six queries that build a priceable row. They have to agree
+    /// exactly: a part that costs one thing in search and another in the basket
+    /// is the worst kind of wrong.
+    ///
+    /// On the interface rather than left to each record, so that adding it
+    /// breaks every query that has not joined the view. The other API needs a
+    /// runtime guard for the same purpose because its rows come out of casts;
+    /// here the compiler does it.
+    /// </remarks>
+    double? OfferPrice { get; }
+
+    /// <summary>Whose offer that was, for the supplier markup dimension.</summary>
+    string? OfferSupplierId { get; }
+
     /// <summary>
     /// The commercial category the part is in, or null.
     ///
