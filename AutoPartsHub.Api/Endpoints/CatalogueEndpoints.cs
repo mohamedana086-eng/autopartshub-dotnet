@@ -1,3 +1,5 @@
+using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,16 +32,25 @@ public static class CatalogueEndpoints
         });
 
         // GET /api/suppliers — everyone we buy from, for the directory page.
-        app.MapGet("/api/suppliers", async (AutoPartsContext db) =>
+        app.MapGet("/api/suppliers", async (
+            HttpContext http, AutoPartsContext db, SessionTokens tokens) =>
         {
+            // Nothing here is priced, so there is no account load to take the
+            // role from and the signed cookie is read directly.
+            var naming = SupplierNaming.For(http, tokens);
+
             var suppliers = await db.Suppliers
                 // The public directory lists who is trading. One waiting for
                 // approval has no page and no entry: the whole point of
                 // arriving switched off is that nothing shows until an admin
                 // says so.
                 .Where(s => s.Active)
+                // Ordered by the real name, not by whatever is published.
+                // Anonymising is a rendering decision and must not reshuffle
+                // the page: two callers see the same directory in the same
+                // order, and only the labels differ.
                 .OrderBy(s => s.Name)
-                .Select(s => new SupplierDto(
+                .Select(s => new SupplierRow(
                     s.Id, s.Code, s.Slug, s.Name, s.Description, s.Reliability,
                     s.Rating, s.AcceptsReturns, s.Country, s.GuaranteeMonths,
                     // Counted in the database. EF turns this into a correlated
@@ -49,7 +60,15 @@ public static class CatalogueEndpoints
                 .AsNoTracking()
                 .ToListAsync();
 
-            return Results.Ok(new { suppliers });
+            return Results.Ok(new
+            {
+                // The naming is applied here rather than in the projection
+                // above: it is a C# decision and EF has no translation for it.
+                suppliers = suppliers.Select(s => new SupplierDto(
+                    s.Id, s.Code, s.Slug, naming.Of(s.Name, s.Code), s.Description,
+                    s.Reliability, s.Rating, s.AcceptsReturns, s.Country,
+                    s.GuaranteeMonths, s.ProductCount)),
+            });
         });
     }
 }
@@ -61,6 +80,28 @@ public static class CatalogueEndpoints
 /// happens to be loaded. Naming the fields makes the response a decision.
 /// </remarks>
 public record SystemDto(string Id, string Name, string Slug, string Icon);
+
+/// <summary>
+/// A directory row as the database gives it, before a name has been chosen.
+/// </summary>
+/// <remarks>
+/// Separate from <see cref="SupplierDto"/> so that the row carrying the real
+/// name and the record that goes on the wire are different types. Reusing one
+/// would make "the name is already anonymised" a fact about where you are in
+/// the method rather than about which type you are holding.
+/// </remarks>
+public record SupplierRow(
+    string Id,
+    string Code,
+    string Slug,
+    string Name,
+    string? Description,
+    string Reliability,
+    int? Rating,
+    bool? AcceptsReturns,
+    string? Country,
+    int? GuaranteeMonths,
+    int ProductCount);
 
 public record SupplierDto(
     string Id,

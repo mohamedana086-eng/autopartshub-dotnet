@@ -89,7 +89,11 @@ public sealed class SearchQueries(AutoPartsContext db)
                    bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    img."url" AS "ImageUrl", img."alt" AS "ImageAlt",
                    st."available" AS "Available",
-                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating",
+                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName",
+                   -- Both names travel; SupplierNaming picks one. Reading the
+                   -- code here costs nothing — it is on a row already joined —
+                   -- and the alternative is a second lookup per response.
+                   s."code" AS "SupplierCode", s."rating" AS "SupplierRating",
                    s."reliability" AS "SupplierReliability", s."acceptsReturns" AS "SupplierAcceptsReturns"
             FROM "Product" p
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
@@ -320,7 +324,11 @@ public sealed class SearchQueries(AutoPartsContext db)
                    bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    img."url" AS "ImageUrl", img."alt" AS "ImageAlt",
                    st."available" AS "Available",
-                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating",
+                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName",
+                   -- Both names travel; SupplierNaming picks one. Reading the
+                   -- code here costs nothing — it is on a row already joined —
+                   -- and the alternative is a second lookup per response.
+                   s."code" AS "SupplierCode", s."rating" AS "SupplierRating",
                    s."reliability" AS "SupplierReliability", s."acceptsReturns" AS "SupplierAcceptsReturns"
             FROM "Product" p
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
@@ -462,8 +470,19 @@ public sealed class SearchQueries(AutoPartsContext db)
     public Task<string?> SystemNameBySlugAsync(string slug, CancellationToken ct = default) =>
         db.VehicleSystems.Where(v => v.Slug == slug).Select(v => v.Name).FirstOrDefaultAsync(ct);
 
-    public Task<string?> SupplierNameBySlugAsync(string slug, CancellationToken ct = default) =>
-        db.Suppliers.Where(s => s.Slug == slug).Select(s => s.Name).FirstOrDefaultAsync(ct);
+    /// <summary>
+    /// What the supplier filter shows it is doing — both names, so the caller
+    /// can publish whichever <see cref="SupplierNaming"/> allows.
+    /// </summary>
+    /// <remarks>
+    /// Returns the pair rather than a resolved name because the label is
+    /// built where the role is known, and a query that took the role would be
+    /// a second place the anonymity rule lived.
+    /// </remarks>
+    public Task<SupplierNames?> SupplierNamesBySlugAsync(string slug, CancellationToken ct = default) =>
+        db.Suppliers.Where(s => s.Slug == slug)
+            .Select(s => new SupplierNames(s.Name, s.Code))
+            .FirstOrDefaultAsync(ct);
 
     /// <summary>"BMW 3 Series (E90) 320d 2.0" — what the vehicle filter shows it is doing.</summary>
     public async Task<string?> VariantLabelAsync(string variantId, CancellationToken ct = default) =>
@@ -515,6 +534,8 @@ public record SearchRow(
     int? Available,
     string? SupplierSlug,
     string? SupplierName,
+    /// <summary>The opaque handle a customer sees instead of the name.</summary>
+    string? SupplierCode,
     int? SupplierRating,
     string? SupplierReliability,
     bool? SupplierAcceptsReturns) : IPriceable;
@@ -593,6 +614,8 @@ public record CountedSearchRow(
     int? Available,
     string? SupplierSlug,
     string? SupplierName,
+    /// <summary>The opaque handle a customer sees instead of the name.</summary>
+    string? SupplierCode,
     int? SupplierRating,
     string? SupplierReliability,
     bool? SupplierAcceptsReturns)
@@ -603,7 +626,8 @@ public record CountedSearchRow(
         ManufacturerName, SystemName, SystemSlug, ListPrice, ListRowMarkupPercent,
         OfferPrice, OfferSupplierId,
         ImageUrl, ImageAlt, Available,
-        SupplierSlug, SupplierName, SupplierRating, SupplierReliability, SupplierAcceptsReturns);
+        SupplierSlug, SupplierName, SupplierCode, SupplierRating, SupplierReliability,
+        SupplierAcceptsReturns);
 }
 
 /// <summary>One facet tally. <c>Label</c> carries the system's name; nothing else needs one.</summary>

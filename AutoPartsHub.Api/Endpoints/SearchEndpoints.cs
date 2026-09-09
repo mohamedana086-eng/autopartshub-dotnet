@@ -157,8 +157,18 @@ public static class SearchEndpoints
             var matchedTotal = found.Total;
             var systemName = system is null ? null : await queries.SystemNameBySlugAsync(system, ct);
             var variantName = variant is null ? null : await queries.VariantLabelAsync(variant, ct);
-            var supplierName = supplier is null ? null : await queries.SupplierNameBySlugAsync(supplier, ct);
+            var supplierNames = supplier is null ? null : await queries.SupplierNamesBySlugAsync(supplier, ct);
             var ctx = await pricing.LoadAsync(http, ct);
+            // Who may see a supplier's real name. Taken from the account the
+            // pricing was loaded for rather than from the cookie, so a role
+            // changed since the last sign-in takes effect on this request.
+            var naming = SupplierNaming.For(ctx.ClientRole);
+            // The label the supplier filter shows. Anonymised like every other
+            // supplier reference: a customer who filters by a code must not be
+            // told back whose code it was.
+            var supplierName = supplierNames is null
+                ? null
+                : naming.Of(supplierNames.Name, supplierNames.Code);
 
             // Nothing matched as typed — try again allowing for a misspelling,
             // and say so in the response so the UI does not present guesses as
@@ -325,9 +335,9 @@ public static class SearchEndpoints
                         // Null where nobody has counted this part in — not the
                         // same as none left.
                         p.Available,
-                        p.SupplierSlug is null ? null : new SearchSupplierDto(
-                            p.SupplierSlug, p.SupplierName!, p.SupplierRating,
-                            p.SupplierReliability!, p.SupplierAcceptsReturns),
+                        naming.Search(
+                            p.SupplierSlug, p.SupplierName, p.SupplierCode, p.SupplierRating,
+                            p.SupplierReliability, p.SupplierAcceptsReturns),
                         matchedOn, matchedVia, matchedViaManufacturer));
                 })
                 .ToList();

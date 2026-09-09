@@ -1,3 +1,5 @@
+using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,8 +20,13 @@ public static class SupplierPageEndpoints
     public static void MapSupplierPageEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/suppliers/{slug}", async (
-            string slug, AutoPartsContext db, CancellationToken ct) =>
+            string slug, HttpContext http, AutoPartsContext db, SessionTokens tokens,
+            CancellationToken ct) =>
         {
+            // Nothing here is priced, so the role comes from the signed cookie
+            // rather than from an account load this page has no other use for.
+            var naming = SupplierNaming.For(http, tokens);
+
             var supplier = (await db.Database.SqlQuery<SupplierPageRow>($"""
                 SELECT s."id" AS "Id", s."code" AS "Code", s."slug" AS "Slug", s."name" AS "Name",
                        s."description" AS "Description", s."reliability" AS "Reliability",
@@ -69,7 +76,7 @@ public static class SupplierPageEndpoints
                     id = supplier.Id,
                     code = supplier.Code,
                     slug = supplier.Slug,
-                    name = supplier.Name,
+                    name = naming.Of(supplier.Name, supplier.Code),
                     description = supplier.Description,
                     reliability = supplier.Reliability,
                     rating = supplier.Rating,
