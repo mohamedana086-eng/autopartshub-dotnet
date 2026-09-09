@@ -9,6 +9,12 @@
 
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <!-- The same Entity Framework the API resolves. Without it this project
+         picks up 10.0.4 through Npgsql while the API is on 10.0.11 through
+         EntityFrameworkCore.Design, which has been emitting MSB3277 for a
+         while and turns into an error the moment a test names a type whose
+         constructor mentions a DbContext. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.11" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />

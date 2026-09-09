@@ -78,6 +78,11 @@ builder.Services.AddSingleton<AutoPartsHub.Api.Mail.Mailer>();
 // Scoped, not singleton: unlike AdminGate it reads the database, so it takes
 // the request's DbContext.
 builder.Services.AddScoped<SupplierGate>();
+// Refuses an id that arrives in a request body and names something outside
+// the caller's scope. Scoped for the same reason SupplierGate is. The ids in
+// a route are not its business — those are narrowed inside the statement that
+// writes them, which is stronger. See IScopeGuard.
+builder.Services.AddScoped<IScopeGuard, ScopeGuard>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
