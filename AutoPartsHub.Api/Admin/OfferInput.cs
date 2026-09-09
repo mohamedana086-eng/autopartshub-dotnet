@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AutoPartsHub.Domain;
 
 namespace AutoPartsHub.Api.Admin;
 

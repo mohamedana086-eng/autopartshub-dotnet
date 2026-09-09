@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Catalogue;
+namespace AutoPartsHub.Domain.Catalogue;
 
 /// <summary>
 /// Whether a part can be sold from stock.

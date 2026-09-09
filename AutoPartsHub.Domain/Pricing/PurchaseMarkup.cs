@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Pricing;
+namespace AutoPartsHub.Domain.Pricing;
 
 /// <summary>Which rung of the purchase-side chain answered.</summary>
 public enum MarkupRung

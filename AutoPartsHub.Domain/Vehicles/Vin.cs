@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Vehicles;
+namespace AutoPartsHub.Domain.Vehicles;
 
 /// <summary>
 /// VIN parsing — structure only.

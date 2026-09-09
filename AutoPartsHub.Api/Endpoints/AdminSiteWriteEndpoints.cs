@@ -3,6 +3,9 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain.Pricing;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;

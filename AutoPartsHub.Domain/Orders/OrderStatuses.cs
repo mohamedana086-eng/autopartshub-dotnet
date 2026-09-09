@@ -1,7 +1,7 @@
 using System.Text.Json;
-using AutoPartsHub.Api.Admin;
+using AutoPartsHub.Domain;
 
-namespace AutoPartsHub.Api.Orders;
+namespace AutoPartsHub.Domain.Orders;
 
 /// <summary>What an order in a given status is doing to the shelves.</summary>
 /// <remarks>
@@ -165,7 +165,7 @@ public static class OrderStatuses
 
         if (!IsKnown(status))
         {
-            return Validators.Fail<StatusChange>(
+            return Validation.Fail<StatusChange>(
                 $"Status must be one of: {string.Join(", ", All)}.");
         }
 
@@ -175,25 +175,25 @@ public static class OrderStatuses
         {
             // Not an error. Saving the screen twice should not be a failure,
             // and the shelf change for a move to where you already are is zero.
-            return Validators.Ok(new StatusChange(status, reason, null, null));
+            return Validation.Ok(new StatusChange(status, reason, null, null));
         }
 
         if (!CanMove(from, status))
         {
             var open = MovesFrom(from);
-            return Validators.Fail<StatusChange>(open.Length == 0
+            return Validation.Fail<StatusChange>(open.Length == 0
                 ? $"This order is {from} and finished; nothing can move it."
                 : $"An order that is {from} can only become: {string.Join(", ", open)}.");
         }
 
         if (NeedsReason(status) && reason is null)
         {
-            return Validators.Fail<StatusChange>(
+            return Validation.Fail<StatusChange>(
                 $"Say why the order was {status}. Nobody can work it out from the row afterwards.");
         }
         if (reason is not null && reason.Length > MaxReason)
         {
-            return Validators.Fail<StatusChange>($"Keep the reason under {MaxReason} characters.");
+            return Validation.Fail<StatusChange>($"Keep the reason under {MaxReason} characters.");
         }
 
         var trackingNumber = Text(JsonValues.Get(body, "trackingNumber"));
@@ -204,11 +204,11 @@ public static class OrderStatuses
         // picked, which is a number a customer would be given and could not use.
         if ((trackingNumber is not null || carrier is not null) && status != Shipped)
         {
-            return Validators.Fail<StatusChange>(
+            return Validation.Fail<StatusChange>(
                 "A tracking number can only be given when the order ships.");
         }
 
-        return Validators.Ok(new StatusChange(status, reason, trackingNumber, carrier));
+        return Validation.Ok(new StatusChange(status, reason, trackingNumber, carrier));
     }
 
     private static string? Text(JsonElement? element)

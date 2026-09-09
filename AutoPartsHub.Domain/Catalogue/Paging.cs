@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace AutoPartsHub.Api.Catalogue;
+namespace AutoPartsHub.Domain.Catalogue;
 
 /// <summary>
 /// Turning <c>page</c> and <c>pageSize</c> from a query string into a slice.

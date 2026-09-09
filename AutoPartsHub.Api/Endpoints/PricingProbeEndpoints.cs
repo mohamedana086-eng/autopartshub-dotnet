@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Pricing;
 
 namespace AutoPartsHub.Api.Endpoints;
 

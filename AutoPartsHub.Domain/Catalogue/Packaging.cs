@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Catalogue;
+namespace AutoPartsHub.Domain.Catalogue;
 
 /// <summary>
 /// How a part is packed, and what that allows somebody to order.

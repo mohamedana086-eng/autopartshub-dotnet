@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
-using AutoPartsHub.Api.Admin;
+using AutoPartsHub.Domain;
 
-namespace AutoPartsHub.Api.Orders;
+namespace AutoPartsHub.Domain.Orders;
 
 /// <summary>What the order list was asked to narrow to.</summary>
 /// <param name="Before">
@@ -56,17 +56,32 @@ public static partial class OrderFilters
             : null;
     }
 
-    public static Validated<OrderFilter> Read(IQueryCollection query)
+    /// <summary>
+    /// Reads the four filter values, whatever they arrived in.
+    /// </summary>
+    /// <remarks>
+    /// A lookup function rather than the request's own query collection. Every
+    /// rule below — which statuses exist, that a bare date means UTC midnight,
+    /// that an unreadable date is refused rather than ignored, that <c>to</c>
+    /// is exclusive of the day after — is a rule about orders, and none of it
+    /// is a rule about HTTP. Taking the collection would have pinned all of it
+    /// to ASP.NET, which is the whole of why this file could not build in a
+    /// layer that has no web framework in it.
+    ///
+    /// The caller passes <c>key =&gt; query[key]</c> and keeps the one line
+    /// that knows where a query string lives.
+    /// </remarks>
+    public static Validated<OrderFilter> Read(Func<string, string?> value)
     {
-        var status = query["status"].ToString().Trim();
+        var status = (value("status") ?? "").Trim();
         if (status.Length > 0 && !OrderStatuses.IsKnown(status))
         {
-            return Validators.Fail<OrderFilter>(
+            return Validation.Fail<OrderFilter>(
                 $"Status must be one of: {string.Join(", ", OrderStatuses.All)}.");
         }
 
-        var fromRaw = query["from"].ToString().Trim();
-        var toRaw = query["to"].ToString().Trim();
+        var fromRaw = (value("from") ?? "").Trim();
+        var toRaw = (value("to") ?? "").Trim();
         var from = ReadDate(fromRaw);
         var to = ReadDate(toRaw);
 
@@ -76,11 +91,11 @@ public static partial class OrderFilters
         // one that fails, because the numbers still look plausible.
         if (fromRaw.Length > 0 && from is null)
         {
-            return Validators.Fail<OrderFilter>("The `from` date could not be read. Use YYYY-MM-DD.");
+            return Validation.Fail<OrderFilter>("The `from` date could not be read. Use YYYY-MM-DD.");
         }
         if (toRaw.Length > 0 && to is null)
         {
-            return Validators.Fail<OrderFilter>("The `to` date could not be read. Use YYYY-MM-DD.");
+            return Validation.Fail<OrderFilter>("The `to` date could not be read. Use YYYY-MM-DD.");
         }
 
         var before = to is null ? null
@@ -89,12 +104,12 @@ public static partial class OrderFilters
 
         if (from is not null && before is not null && before <= from)
         {
-            return Validators.Fail<OrderFilter>("The `to` date is not after the `from` date.");
+            return Validation.Fail<OrderFilter>("The `to` date is not after the `from` date.");
         }
 
-        var managerId = query["managerId"].ToString().Trim();
+        var managerId = (value("managerId") ?? "").Trim();
 
-        return Validators.Ok(new OrderFilter(
+        return Validation.Ok(new OrderFilter(
             status.Length > 0 ? status : null,
             from,
             before,

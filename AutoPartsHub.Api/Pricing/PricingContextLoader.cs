@@ -1,5 +1,6 @@
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Pricing;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Pricing;

@@ -3,7 +3,7 @@ using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Inventory;
 using AutoPartsHub.Api.Mail;
-using AutoPartsHub.Api.Orders;
+using AutoPartsHub.Domain.Orders;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 

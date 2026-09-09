@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 using AutoPartsHub.Api.Mail;
-using AutoPartsHub.Api.Orders;
+using AutoPartsHub.Domain.Orders;
 
 namespace AutoPartsHub.Tests;
 

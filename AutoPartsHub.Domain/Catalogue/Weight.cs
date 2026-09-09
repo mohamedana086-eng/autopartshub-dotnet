@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Catalogue;
+namespace AutoPartsHub.Domain.Catalogue;
 
 /// <summary>
 /// What a part weighs, and what an order therefore weighs.

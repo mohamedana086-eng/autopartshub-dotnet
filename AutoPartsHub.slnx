@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="AutoPartsHub.Domain/AutoPartsHub.Domain.csproj" />
   <Project Path="AutoPartsHub.Api/AutoPartsHub.Api.csproj" />
   <Project Path="AutoPartsHub.Tests/AutoPartsHub.Tests.csproj" />
 </Solution>

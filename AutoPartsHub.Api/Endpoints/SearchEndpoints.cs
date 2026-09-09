@@ -1,6 +1,7 @@
-using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Catalogue;
+using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
 
 namespace AutoPartsHub.Api.Endpoints;
 

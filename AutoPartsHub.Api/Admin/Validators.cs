@@ -1,6 +1,8 @@
 using System.Text.Json;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Pricing;
+using AutoPartsHub.Domain;
 
 namespace AutoPartsHub.Api.Admin;
 
@@ -14,8 +16,8 @@ namespace AutoPartsHub.Api.Admin;
 /// </remarks>
 public static class Validators
 {
-    public static Validated<T> Ok<T>(T value) => new(true, value, null);
-    public static Validated<T> Fail<T>(string error) => new(false, default, error);
+    public static Validated<T> Ok<T>(T value) => Validation.Ok(value);
+    public static Validated<T> Fail<T>(string error) => Validation.Fail<T>(error);
 
     private static string Text(JsonElement body, string key) =>
         JsonValues.AsString(JsonValues.Get(body, key)).Trim();
@@ -415,7 +417,7 @@ public static class Validators
         JsonValues.Get(body, key) is { ValueKind: JsonValueKind.False };
 }
 
-public record Validated<T>(bool Ok, T? Value, string? Error);
+
 
 public record SupplierInput(
     string Name, string Code, string Slug, string? Description, string Reliability,

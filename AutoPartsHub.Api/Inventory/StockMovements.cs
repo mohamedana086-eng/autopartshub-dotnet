@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Orders;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Inventory;
@@ -126,7 +127,7 @@ public static class StockMovements
     /// both deltas at zero and does nothing.
     /// </remarks>
     public static async Task ApplyShelfChangeAsync(
-        AutoPartsContext db, string orderId, Orders.ShelfChange change,
+        AutoPartsContext db, string orderId, ShelfChange change,
         CancellationToken ct = default)
     {
         if (change.Quantity == 0 && change.Reserved == 0) return;

@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Vehicles;
+namespace AutoPartsHub.Domain.Vehicles;
 
 /// <summary>
 /// The nine things a customer can be asked about a car.

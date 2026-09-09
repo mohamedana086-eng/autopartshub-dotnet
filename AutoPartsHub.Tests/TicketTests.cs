@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Support;
+using AutoPartsHub.Domain;
 
 namespace AutoPartsHub.Tests;
 

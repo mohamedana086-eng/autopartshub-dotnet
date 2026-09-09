@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace AutoPartsHub.Api.Pricing;
+namespace AutoPartsHub.Domain.Pricing;
 
 /// <summary>
 /// Reading the dates a markup rule is in force between. The mirror of

@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Pricing;
+namespace AutoPartsHub.Domain.Pricing;
 
 /// <summary>How a condition's value is compared to what the request offers.</summary>
 public enum MatchKind

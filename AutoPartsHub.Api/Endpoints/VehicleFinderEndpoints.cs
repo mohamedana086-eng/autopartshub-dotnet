@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Vehicles;
+using AutoPartsHub.Domain.Vehicles;
 
 namespace AutoPartsHub.Api.Endpoints;
 

@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Catalogue;

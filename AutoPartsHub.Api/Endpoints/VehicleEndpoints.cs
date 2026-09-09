@@ -1,6 +1,7 @@
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Vehicles;
+using AutoPartsHub.Domain.Vehicles;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;

@@ -1,7 +1,8 @@
 using AutoPartsHub.Api.Auth;
-using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Catalogue;
-using AutoPartsHub.Api.Orders;
+using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain.Orders;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -217,7 +218,7 @@ public static class AdminDeskEndpoints
             // request can narrow the set it is allowed to see, never widen it.
             var scope = g.ScopeTo;
 
-            var filter = OrderFilters.Read(http.Request.Query);
+            var filter = OrderFilters.Read(key => http.Request.Query[key]);
             if (!filter.Ok) return Results.BadRequest(new { error = filter.Error });
 
             var f = filter.Value!;

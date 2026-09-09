@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Pricing;
 
 namespace AutoPartsHub.Tests;
 

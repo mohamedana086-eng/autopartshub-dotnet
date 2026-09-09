@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace AutoPartsHub.Api;
+namespace AutoPartsHub.Domain;
 
 /// <summary>
 /// Reads request fields the way the JavaScript API does.

@@ -3,6 +3,8 @@ using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Inventory;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 

@@ -1,4 +1,4 @@
-namespace AutoPartsHub.Api.Pricing;
+namespace AutoPartsHub.Domain.Pricing;
 
 /// <summary>
 /// Resolves the final client-facing price for a (client, product) pair.

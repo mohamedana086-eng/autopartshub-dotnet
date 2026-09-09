@@ -1,7 +1,7 @@
 using System.Text.Json;
-using AutoPartsHub.Api.Endpoints;
+using AutoPartsHub.Domain.Catalogue;
 
-namespace AutoPartsHub.Api.Pricing;
+namespace AutoPartsHub.Domain.Pricing;
 
 /// <summary>One rung of a ladder, as a form sends it.</summary>
 /// <param name="From">Where the rung starts, in the base currency. The first must be 0.</param>

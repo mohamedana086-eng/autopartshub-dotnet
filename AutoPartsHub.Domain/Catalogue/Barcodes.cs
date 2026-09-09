@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace AutoPartsHub.Api.Catalogue;
+namespace AutoPartsHub.Domain.Catalogue;
 
 /// <summary>
 /// Barcodes, and telling a real one from a typo.

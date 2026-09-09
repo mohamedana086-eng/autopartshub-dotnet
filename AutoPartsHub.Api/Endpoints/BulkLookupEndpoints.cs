@@ -2,6 +2,8 @@ using System.Text.Json;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
