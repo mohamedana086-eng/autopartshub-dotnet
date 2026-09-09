@@ -499,3 +499,7 @@ tools/search-snapshot.json
 # The file transport's outbox. Development only, and it holds whatever was
 # sent — including anything a reset flow would put in a link.
 .mail/
+
+# Uploaded price lists and archives. LocalDiskFileStore keeps them outside
+# the web root; a deployment points IFileStore somewhere else entirely.
+.uploads/

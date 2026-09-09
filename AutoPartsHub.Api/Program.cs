@@ -1,9 +1,11 @@
 using AutoPartsHub.Api;
 using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Endpoints;
-using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Application.Abstractions;
+using AutoPartsHub.Infrastructure.Local;
 using Microsoft.EntityFrameworkCore;
 
 // The catalogue is ordered with culture-aware comparisons, because that is
@@ -83,6 +85,31 @@ builder.Services.AddScoped<SupplierGate>();
 // a route are not its business — those are narrowed inside the statement that
 // writes them, which is stronger. See IScopeGuard.
 builder.Services.AddScoped<IScopeGuard, ScopeGuard>();
+
+// The integrations, behind interfaces, with local implementations bound here.
+//
+// Every one of these is a thing this deployment does not have: there is no
+// TecDoc subscription, no Odoo, no Redis and no SMTP server. The point of
+// naming them now is that acquiring one becomes a line in this block plus a
+// class in Infrastructure, rather than a change to the code that uses it —
+// and until then the API and the worker run with none of them, which is what
+// makes a checkout testable on a laptop.
+//
+// Bound unconditionally rather than under IsDevelopment(). A production
+// binding that silently differs from the one every test runs against is how a
+// deployment develops behaviour nobody has exercised; when a real adapter
+// exists it replaces the line, and the fake stops being reachable at all.
+builder.Services.AddSingleton<IPriceCache, InMemoryPriceCache>();
+builder.Services.AddSingleton<ITecDocClient, FakeTecDocClient>();
+builder.Services.AddSingleton<IOdooClient, FakeOdooClient>();
+// Outside the content root, not under it: a file whose contents the caller
+// chose, served back from this origin, is stored cross-site scripting.
+builder.Services.AddSingleton<IFileStore>(_ => new LocalDiskFileStore(
+    Path.Combine(builder.Environment.ContentRootPath, "..", ".uploads")));
+// The real one — it writes the file outbox, or refuses in production, exactly
+// as it did before there was an interface in front of it.
+builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<AutoPartsHub.Api.Mail.Mailer>());
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 builder.Services.AddDbContext<AutoPartsContext>(options =>
     options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));

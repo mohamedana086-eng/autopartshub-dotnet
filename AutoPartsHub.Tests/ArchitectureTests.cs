@@ -1,4 +1,5 @@
 using System.Reflection;
+using AutoPartsHub.Application.Abstractions;
 using AutoPartsHub.Domain.Pricing;
 
 namespace AutoPartsHub.Tests;
@@ -153,5 +154,88 @@ public class ArchitectureTests
 
         Assert.DoesNotContain("PackageReference", project);
         Assert.DoesNotContain("ProjectReference", project);
+    }
+
+    // ------------------------------------------------- the layer above it
+
+    private static readonly Assembly Application = typeof(IEmailSender).Assembly;
+
+    /// <remarks>
+    /// The abstractions describe what the application needs done, in the
+    /// application's own words. The moment one of them mentions a
+    /// <c>DbContext</c> or an <c>HttpContext</c>, the thing it was abstracting
+    /// has leaked through it and the layer is decoration.
+    /// </remarks>
+    [Fact]
+    public void TheAbstractionsNameNoFramework()
+    {
+        var reached = Application.GetReferencedAssemblies()
+            .Select(a => a.Name ?? "")
+            .Where(name => Forbidden.Any(f => name.StartsWith(f, StringComparison.Ordinal)))
+            .ToList();
+
+        Assert.True(reached.Count == 0, $"AutoPartsHub.Application has picked up: {string.Join(", ", reached)}");
+    }
+
+    /// <summary>
+    /// Every integration the platform does not own is behind an interface, and
+    /// every one of those interfaces is bound.
+    /// </summary>
+    /// <remarks>
+    /// The acceptance criterion is that each is replaceable and registered, and
+    /// an interface nothing binds is neither — it is a file that compiles. This
+    /// reads the composition root as text rather than building a container,
+    /// because what is being asserted is that somebody wrote the line: a
+    /// container assembled in a test proves only that the test assembled one.
+    ///
+    /// It also means an abstraction added later fails this until it is bound,
+    /// which is the reminder worth having.
+    /// </remarks>
+    [Fact]
+    public void EveryAbstractionIsBoundInTheCompositionRoot()
+    {
+        var program = File.ReadAllText(Path.Combine(
+            SolutionRoot().FullName, "AutoPartsHub.Api", "Program.cs"));
+
+        var declared = Application.GetExportedTypes()
+            .Where(t => t.IsInterface && t.Namespace == "AutoPartsHub.Application.Abstractions")
+            .ToList();
+
+        // An interface another abstraction hands back is not a service. The
+        // container never resolves ITransaction — IUnitOfWork returns one — and
+        // demanding a registration for it would be demanding a wrong one.
+        // Derived rather than listed, so that the next handle-shaped return
+        // type does not have to be remembered.
+        var handedBack = declared
+            .SelectMany(t => t.GetMethods())
+            .Select(m => m.ReturnType)
+            .Select(t => t.IsGenericType ? t.GetGenericArguments().FirstOrDefault() ?? t : t)
+            .Where(t => t.IsInterface)
+            .ToHashSet();
+
+        var services = declared.Where(t => !handedBack.Contains(t)).Select(t => t.Name).ToList();
+
+        Assert.NotEmpty(services);
+
+        var unbound = services.Where(name => !program.Contains(name)).ToList();
+
+        Assert.True(
+            unbound.Count == 0,
+            $"declared and never bound: {string.Join(", ", unbound)}. "
+            + "An interface nothing registers is not a seam, it is a file.");
+    }
+
+    /// <remarks>
+    /// Infrastructure is where the frameworks are allowed to be, so this does
+    /// not check what it references. It checks the direction: the
+    /// implementations may know about the abstractions, and the abstractions
+    /// may not know about the implementations.
+    /// </remarks>
+    [Fact]
+    public void TheAbstractionsDoNotKnowTheirImplementations()
+    {
+        Assert.DoesNotContain(
+            Application.GetReferencedAssemblies(),
+            a => a.Name == "AutoPartsHub.Infrastructure" || a.Name == "AutoPartsHub.Api");
     }
 }

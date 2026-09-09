@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AutoPartsHub.Domain\AutoPartsHub.Domain.csproj" />
+    <ProjectReference Include="..\AutoPartsHub.Infrastructure\AutoPartsHub.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
