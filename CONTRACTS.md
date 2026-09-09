@@ -28,7 +28,9 @@ this file is checked by running the generator and looking at the diff.
 
 ## The count
 
-95 routes. Four of them are called by the storefront and answered by nothing.
+96 routes. Four are called by the storefront and answered by nothing. One is
+answered and not yet called — `POST /api/auth/register-supplier`, which is the
+first step of the move described below.
 
 ## What the storefront asks for and nothing answers
 
@@ -52,7 +54,7 @@ each has to be settled before the screen is built rather than after.
 
 | Area | Today | The backlog asks for |
 |---|---|---|
-| Supplier sign-up | `POST /api/suppliers/register` | `POST /api/auth/register-supplier` |
+| Supplier sign-up | ~~`POST /api/suppliers/register`~~ — both served | `POST /api/auth/register-supplier` ✅ |
 | Failed searches | `GET /api/admin/search-misses` | `GET /api/admin/failed-searches` + `resolve` / `reopen` |
 | Cart write | `PUT /api/cart` (whole-basket replace) | `POST` / `PATCH` / `DELETE /api/cart/lines` |
 | Bulk body | `partNumbers[]`, 1000 rows | `rows[]` with a manufacturer per row, 2000 rows, 2 MB |
@@ -61,6 +63,11 @@ each has to be settled before the screen is built rather than after.
 | Ticket status | `PATCH /api/admin/tickets/{id}` | `PATCH /api/tickets/{id}/status` + `PUT following` |
 | Readiness | `/health/db` | `/health/ready` covering SQL Server and Redis |
 | Search filter | `partType` | `offerType`, kept separate from `matchIn` |
+
+The sign-up row is the one that has moved. Both paths are served, so the
+storefront can change when it changes; dropping `/api/suppliers/register` is
+the third step and waits on the caller moving. Everything else in the table is
+still as it was.
 
 `PUT /api/cart` is the one worth naming twice. It is a whole-basket replace
 because the storefront keeps the basket in `localStorage` and mirrors it — the
@@ -165,8 +172,8 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `POST` | `/api/admin/suppliers` | Endpoints/AdminSiteWriteEndpoints.cs:27 | core/admin.service.ts:206 |
 | `DELETE` | `/api/admin/suppliers/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:150 | core/admin.service.ts:237 |
 | `PATCH` | `/api/admin/suppliers/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:65 | core/admin.service.ts:211<br>core/admin.service.ts:222<br>core/admin.service.ts:232 |
-| `PATCH` | `/api/admin/suppliers/{id}/approval` | Endpoints/SupplierSignupEndpoints.cs:224 | core/admin.service.ts:518 |
-| `GET` | `/api/admin/suppliers/waiting` | Endpoints/SupplierSignupEndpoints.cs:178 | core/admin.service.ts:500 |
+| `PATCH` | `/api/admin/suppliers/{id}/approval` | Endpoints/SupplierSignupEndpoints.cs:238 | core/admin.service.ts:518 |
+| `GET` | `/api/admin/suppliers/waiting` | Endpoints/SupplierSignupEndpoints.cs:192 | core/admin.service.ts:500 |
 | `GET` | `/api/admin/tickets` | Endpoints/TicketEndpoints.cs:172 | core/admin.service.ts:376 |
 | `GET` | `/api/admin/tickets/{id}` | Endpoints/TicketEndpoints.cs:231 | core/admin.service.ts:381 |
 | `PATCH` | `/api/admin/tickets/{id}` | Endpoints/TicketEndpoints.cs:263 | core/admin.service.ts:400 |
@@ -182,6 +189,7 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `POST` | `/api/auth/password/forgot` | **absent** | pages/forgot-password.page.ts:80 |
 | `POST` | `/api/auth/password/reset` | **absent** | pages/reset-password.page.ts:101 |
 | `POST` | `/api/auth/register` | Endpoints/AuthEndpoints.cs:56 | core/auth.service.ts:65 |
+| `POST` | `/api/auth/register-supplier` | Endpoints/SupplierSignupEndpoints.cs:45 | _none_ |
 | `GET` | `/api/auth/session` | Endpoints/AuthEndpoints.cs:127 | core/auth.service.ts:46 |
 | `GET` | `/api/cart` | Endpoints/CartEndpoints.cs:30 | core/cart.service.ts:260 |
 | `PUT` | `/api/cart` | Endpoints/CartEndpoints.cs:47 | core/cart.service.ts:235 |
@@ -196,10 +204,10 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `GET` | `/api/supplier/orders` | Endpoints/SupplierPortalEndpoints.cs:108 | core/supplier.service.ts:67 |
 | `GET` | `/api/supplier/stock` | Endpoints/SupplierPortalEndpoints.cs:162 | core/supplier.service.ts:73 |
 | `GET` | `/api/supplier/summary` | Endpoints/SupplierPortalEndpoints.cs:61 | core/supplier.service.ts:61 |
-| `GET` | `/api/suppliers` | Endpoints/CatalogueEndpoints.cs:33 | core/suppliers.service.ts:32 |
-| `GET` | `/api/suppliers/{slug}` | Endpoints/SupplierPageEndpoints.cs:20 | core/suppliers.service.ts:36 |
-| `POST` | `/api/suppliers/register` | Endpoints/SupplierSignupEndpoints.cs:34 | pages/supplier-register.page.ts:159 |
-| `GET` | `/api/systems` | Endpoints/CatalogueEndpoints.cs:21 | core/catalog.service.ts:11 |
+| `GET` | `/api/suppliers` | Endpoints/CatalogueEndpoints.cs:35 | core/suppliers.service.ts:32 |
+| `GET` | `/api/suppliers/{slug}` | Endpoints/SupplierPageEndpoints.cs:22 | core/suppliers.service.ts:36 |
+| `POST` | `/api/suppliers/register` | Endpoints/SupplierSignupEndpoints.cs:46 | pages/supplier-register.page.ts:159 |
+| `GET` | `/api/systems` | Endpoints/CatalogueEndpoints.cs:23 | core/catalog.service.ts:11 |
 | `GET` | `/api/tickets` | Endpoints/TicketEndpoints.cs:40 | core/support.service.ts:19 |
 | `POST` | `/api/tickets` | Endpoints/TicketEndpoints.cs:65 | core/support.service.ts:28 |
 | `GET` | `/api/tickets/{id}` | Endpoints/TicketEndpoints.cs:99 | core/support.service.ts:24 |

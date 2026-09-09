@@ -29,11 +29,25 @@ public static class SupplierSignupEndpoints
 
     public static void MapSupplierSignupEndpoints(this IEndpointRouteBuilder app)
     {
-        // POST /api/suppliers/register
+        // POST /api/auth/register-supplier
         // { company, code, email, password, contactName, country, description }
-        app.MapPost("/api/suppliers/register", async (
+        //
+        // Sign-up belongs under /api/auth with the other two — a supplier
+        // registering is registering, and the noun in the old path made it
+        // look like a write to the supplier list, which is a different thing
+        // an admin does.
+        //
+        // It is also still served at /api/suppliers/register, where the
+        // storefront posts today. The API and the Angular app are separate
+        // deployments, so a route moves in three steps — serve both, move the
+        // caller, drop the old one — and this is the first. CONTRACTS.md lists
+        // it among the differences to settle.
+        app.MapPost("/api/auth/register-supplier", RegisterSupplier);
+        app.MapPost("/api/suppliers/register", RegisterSupplier);
+
+        static async Task<IResult> RegisterSupplier(
             JsonElement body, AutoPartsContext db, SessionTokens tokens,
-            HttpContext http, IHostEnvironment env, CancellationToken ct) =>
+            HttpContext http, IHostEnvironment env, CancellationToken ct)
         {
             string Text(string key) => JsonValues.AsString(JsonValues.Get(body, key)).Trim();
 
@@ -168,7 +182,7 @@ public static class SupplierSignupEndpoints
                             + "as soon as an administrator approves you.",
                 },
                 statusCode: 201);
-        });
+        }
 
         // GET /api/admin/suppliers/waiting — who has applied and not been let in.
         //
