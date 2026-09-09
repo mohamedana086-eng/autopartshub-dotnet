@@ -130,6 +130,15 @@ app.UseCors(StorefrontCors);
 // and the dev probes: a route that wants out has to say so here.
 app.UseMiddleware<CsrfMiddleware>();
 
+// After CSRF, so a request that is refused for both is refused for the reason
+// it would be refused for anyway once it has a token — and so that the token
+// cookie is still issued to a customer who wandered onto an admin URL.
+//
+// The second lock on the admin routes. Every one of them gates itself and a
+// test says so; this is what holds when a handler stops doing it. See
+// AdminRouteGuard for why a source-level assertion is not enough on its own.
+app.UseMiddleware<AdminRouteGuard>();
+
 // Liveness and readiness kept apart on purpose: a host that restarts the
 // container because the database blinked turns a brief outage into a longer one.
 app.MapGet("/health", () => Results.Ok(new { ok = true }));
