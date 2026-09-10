@@ -68,7 +68,16 @@ public partial class AutoPartsContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasPostgresExtension("pg_trgm");
+        // pg_trgm used to be declared here, for the fuzzy fallback the search
+        // falls back to when nothing matched as typed. It is the one piece of
+        // this model that was a statement about which database was underneath,
+        // and SQL Server has no equivalent extension — the fallback becomes a
+        // full-text catalogue plus a prefix seek there, which is T-067 and a
+        // change to the query rather than to the model.
+        //
+        // Removed rather than guarded: a model that declares an extension for
+        // one provider is a model that cannot be migrated by the other, and
+        // the extension was never what made the search work — the query was.
 
         modelBuilder.Entity<Cart>(entity =>
         {
@@ -82,10 +91,10 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.UpdatedAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("updatedAt");
 
             entity.HasOne(d => d.Client).WithOne(p => p.Cart)
@@ -106,7 +115,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AddedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("addedAt");
             entity.Property(e => e.CartId).HasColumnName("cartId");
             entity.Property(e => e.ProductId).HasColumnName("productId");
@@ -142,18 +151,18 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.City).HasColumnName("city");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.CurrencyId).HasColumnName("currencyId");
             entity.Property(e => e.DiscountPercent).HasColumnName("discountPercent");
             entity.Property(e => e.Email).HasColumnName("email");
             entity.Property(e => e.EmailConfirmedAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("emailConfirmedAt");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.PasswordHash).HasColumnName("passwordHash");
             entity.Property(e => e.Role)
-                .HasDefaultValueSql("'RETAIL'::text")
+                .HasDefaultValueSql("'RETAIL'")
                 .HasColumnName("role");
             entity.Property(e => e.SalesManagerId).HasColumnName("salesManagerId");
             entity.Property(e => e.SupplierId).HasColumnName("supplierId");
@@ -168,9 +177,24 @@ public partial class AutoPartsContext : DbContext
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("Client_currencyId_fkey");
 
+            // NO ACTION, and only because SQL Server will not accept anything
+            // else here. PostgreSQL sets the column null when a manager row
+            // goes, which is what the Prisma migration says and what the live
+            // database does; SQL Server refuses a referential action on a
+            // self-reference outright, because it cannot work out the cascade
+            // path — "may cause cycles or multiple cascade paths", error 1785.
+            //
+            // The difference costs nothing that is exercised. Nothing in the
+            // application deletes a customer: the only DELETE against Client
+            // is the development probe that removes an account a test made,
+            // and such an account manages nobody. What changes is that
+            // deleting a manager who still has customers now fails loudly
+            // instead of quietly unassigning them, which is the better of the
+            // two answers to a thing nobody should be doing without deciding
+            // where those customers go.
             entity.HasOne(d => d.SalesManager).WithMany(p => p.InverseSalesManager)
                 .HasForeignKey(d => d.SalesManagerId)
-                .OnDelete(DeleteBehavior.SetNull)
+                .OnDelete(DeleteBehavior.NoAction)
                 .HasConstraintName("Client_salesManagerId_fkey");
 
             entity.HasOne(d => d.Supplier).WithMany(p => p.Clients)
@@ -205,7 +229,7 @@ public partial class AutoPartsContext : DbContext
 
             entity.HasIndex(e => e.IsBase, "Currency_single_base")
                 .IsUnique()
-                .HasFilter("(\"isBase\" = true)");
+                .HasFilter("([isBase] = 1)");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Active)
@@ -292,7 +316,7 @@ public partial class AutoPartsContext : DbContext
                 .HasColumnName("active");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Label).HasColumnName("label");
             entity.Property(e => e.Priority).HasColumnName("priority");
@@ -302,15 +326,15 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.PurchasePriceFrom).HasColumnName("purchasePriceFrom");
             entity.Property(e => e.PurchasePriceTo).HasColumnName("purchasePriceTo");
             entity.Property(e => e.Type)
-                .HasDefaultValueSql("'PERCENT'::text")
+                .HasDefaultValueSql("'PERCENT'")
                 .HasColumnName("type");
             entity.Property(e => e.Value).HasColumnName("value");
             entity.Property(e => e.MinAmount).HasColumnName("minAmount");
             entity.Property(e => e.StartsAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("startsAt");
             entity.Property(e => e.EndsAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("endsAt");
         });
 
@@ -353,15 +377,15 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Link).HasColumnName("link");
             entity.Property(e => e.ReadAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("readAt");
             entity.Property(e => e.Title).HasColumnName("title");
             entity.Property(e => e.Type)
-                .HasDefaultValueSql("'system'::text")
+                .HasDefaultValueSql("'system'")
                 .HasColumnName("type");
 
             entity.HasOne(d => d.Client).WithMany(p => p.Notifications)
@@ -381,17 +405,17 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.CurrencyCode)
-                .HasDefaultValueSql("'EUR'::text")
+                .HasDefaultValueSql("'EUR'")
                 .HasColumnName("currencyCode");
             entity.Property(e => e.CurrencyRate)
                 .HasDefaultValue(1.0)
                 .HasColumnName("currencyRate");
             entity.Property(e => e.Reference).HasColumnName("reference");
             entity.Property(e => e.Status)
-                .HasDefaultValueSql("'order_is_sent'::text")
+                .HasDefaultValueSql("'order_is_sent'")
                 .HasColumnName("status");
 
             entity.HasOne(d => d.Client).WithMany(p => p.Orders)
@@ -458,19 +482,19 @@ public partial class AutoPartsContext : DbContext
 
             entity.HasIndex(e => e.Active, "PriceList_one_active")
                 .IsUnique()
-                .HasFilter("(active = true)");
+                .HasFilter("([active] = 1)");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Active).HasColumnName("active");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Description).HasColumnName("description");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.SourceName).HasColumnName("sourceName");
             entity.Property(e => e.UpdatedAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("updatedAt");
         });
 
@@ -516,10 +540,10 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.BasePrice).HasColumnName("basePrice");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Currency)
-                .HasDefaultValueSql("'EUR'::text")
+                .HasDefaultValueSql("'EUR'")
                 .HasColumnName("currency");
             entity.Property(e => e.Description).HasColumnName("description");
             entity.Property(e => e.ManufacturerId).HasColumnName("manufacturerId");
@@ -560,7 +584,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Alt).HasColumnName("alt");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.ProductId).HasColumnName("productId");
             entity.Property(e => e.SortOrder).HasColumnName("sortOrder");
@@ -590,7 +614,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.Phone).HasColumnName("phone");
@@ -618,7 +642,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Quantity).HasColumnName("quantity");
             entity.Property(e => e.Reserved).HasColumnName("reserved");
             entity.Property(e => e.UpdatedAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("updatedAt");
             entity.Property(e => e.WarehouseId).HasColumnName("warehouseId");
 
@@ -649,7 +673,7 @@ public partial class AutoPartsContext : DbContext
 
             entity.HasIndex(e => e.Slug, "Supplier_slug_key").IsUnique();
 
-            entity.HasIndex(e => e.Active, "Supplier_waiting_idx").HasFilter("(active = false)");
+            entity.HasIndex(e => e.Active, "Supplier_waiting_idx").HasFilter("([active] = 0)");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AcceptsReturns).HasColumnName("acceptsReturns");
@@ -657,7 +681,7 @@ public partial class AutoPartsContext : DbContext
                 .HasDefaultValue(true)
                 .HasColumnName("active");
             entity.Property(e => e.ApprovedAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("approvedAt");
             entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.Country).HasColumnName("country");
@@ -668,7 +692,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.PurchaseCurrencyId).HasColumnName("purchaseCurrencyId");
             entity.Property(e => e.Rating).HasColumnName("rating");
             entity.Property(e => e.Reliability)
-                .HasDefaultValueSql("'standard'::text")
+                .HasDefaultValueSql("'standard'")
                 .HasColumnName("reliability");
             entity.Property(e => e.Slug).HasColumnName("slug");
 
@@ -745,7 +769,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.EngineCode).HasColumnName("engineCode");
             entity.Property(e => e.Fuel)
-                .HasDefaultValueSql("'diesel'::text")
+                .HasDefaultValueSql("'diesel'")
                 .HasColumnName("fuel");
             entity.Property(e => e.ModelId).HasColumnName("modelId");
             entity.Property(e => e.Name).HasColumnName("name");
@@ -774,15 +798,15 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.ExpiresAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("expiresAt");
             entity.Property(e => e.Purpose).HasColumnName("purpose");
             entity.Property(e => e.TokenHash).HasColumnName("tokenHash");
             entity.Property(e => e.UsedAt)
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("usedAt");
 
             entity.HasOne(d => d.Client).WithMany(p => p.VerificationTokens)
@@ -807,7 +831,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.CreatedAt)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP")
-                .HasColumnType("timestamp(3) without time zone")
+                .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Name).HasColumnName("name");
             entity.Property(e => e.Priority).HasColumnName("priority");

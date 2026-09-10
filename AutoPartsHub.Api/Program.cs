@@ -111,8 +111,19 @@ builder.Services.AddSingleton<IFileStore>(_ => new LocalDiskFileStore(
 builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<AutoPartsHub.Api.Mail.Mailer>());
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
+// Two providers, for as long as the move to SQL Server takes. The engine is
+// decided once, here, from DATABASE_PROVIDER or from the shape of the
+// connection string — see ConnectionString.ProviderFor. Everything already
+// deployed reads as PostgreSQL and is untouched.
+var connection = ConnectionString.Resolve(builder.Configuration);
+var provider = ConnectionString.ProviderFor(
+    Environment.GetEnvironmentVariable("DATABASE_PROVIDER"), connection);
+
 builder.Services.AddDbContext<AutoPartsContext>(options =>
-    options.UseNpgsql(ConnectionString.Resolve(builder.Configuration)));
+{
+    if (provider == DatabaseProvider.SqlServer) options.UseSqlServer(connection);
+    else options.UseNpgsql(connection);
+});
 
 // The storefront is served from its own origin and calls this one, so the
 // browser has to be told that is allowed — and with credentials, because the
