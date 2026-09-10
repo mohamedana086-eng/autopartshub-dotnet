@@ -8,9 +8,18 @@ numbers are in `tools/`.
 
 ## Done
 
-**The schema.** 27 tables, 81 indexes, 30 foreign keys, generated from the EF
-model and applied to SQL Server. `dotnet ef database update` builds it from
-nothing.
+**The schema.** 37 tables, one view and four check constraints, generated from
+the EF model and applied to SQL Server. `dotnet ef database update` builds it
+from nothing.
+
+**The model, which was not a description of the database.** It had been
+scaffolded from PostgreSQL once and never regenerated, and eight migrations had
+landed since. Eleven tables the application queries every day, a view, and
+twenty-five columns were absent — invisible for as long as the schema was being
+read *into* the model, and unmissable the moment one had to be generated *from*
+it. All of it is now in `AutoPartsContext.LateSchema.cs`, written from the
+migrations that added it. **Every table and column the raw SQL names now
+resolves.**
 
 **The provider.** `DATABASE_PROVIDER` chooses; the shape of the connection
 string answers when it is unset. Everything currently deployed reads as
@@ -20,10 +29,10 @@ PostgreSQL and is untouched.
 skips, visibly, when there is not one — so the suite still finishes in seconds
 on a machine with nothing installed.
 
-Three engine differences were found by the engine refusing them, and are fixed:
+Five engine differences were found by the engine refusing them, and are fixed:
 a self-referencing foreign key SQL Server will not cascade, three filtered
-index predicates written as `= true`, and forty-three `nvarchar(max)` columns
-that could not be indexed.
+index predicates written as `= true`, forty-three `nvarchar(max)` columns
+that could not be indexed, and two check constraints that compare booleans.
 
 ## The one assumption that held
 
@@ -39,18 +48,21 @@ dialect around them moves.
 
 ## Left to do, in order
 
-### 1. The model is not a description of the database
+### 1. ~~The model is not a description of the database~~ — done
 
-This is the blocker, and it was not visible before the schema was generated.
+This was the blocker, and it was not visible before a schema had to be
+generated. It is fixed; the detail stays because it is why the rest of the plan
+can be trusted, and because the same thing will happen again the next time the
+storefront migrates something.
 
 The EF model was scaffolded from PostgreSQL once and never updated. Eight
-Prisma migrations have landed since. The application reads the tables they
-added through raw SQL — which works against PostgreSQL, because the columns are
-really there — so nothing ever failed to say the model had fallen behind.
+Prisma migrations landed after it. The application reads the tables they added
+through raw SQL — which works against PostgreSQL, because the columns really
+are there — so nothing ever failed to say the model had fallen behind.
 
-**Eleven tables the application queries do not exist in the generated schema:**
+**The eleven tables it queries that the model did not know about:**
 
-| Missing | Added by |
+| Table | Added by |
 |---|---|
 | `ProductSpec` | `20260822160000_add_product_specs` |
 | `ProductBarcode` | `20260823090000_add_barcodes_and_packaging` |
@@ -62,26 +74,36 @@ really there — so nothing ever failed to say the model had fallen behind.
 | `SupplierOffer` | `20260828090000_supplier_offers` |
 | `BestOffer` — a **view**, not a table | `20260828090000_supplier_offers` |
 
-**Seven columns, on tables that do exist:** `goodsCategoryId`, `markupPercent`,
-`minOrderAmount`, `partType`, `priority`, `weightComplete`, `weightGrams`.
+**And twenty-five columns** on tables that were already there, across `Product`,
+`Order`, `Supplier`, `MarkupRule`, `PriceList`, `PriceListItem`, `VehicleModel`
+and `VehicleVariant`.
 
-That list is a floor, not a total. A batch with a syntax error never reaches
-name resolution, so 134 of the statements were refused before SQL Server ever
-checked whether their tables existed. The real figure is knowable only after
-step 2, by re-running the check.
+The dialect check only ever named seven of those columns, because a batch with
+a syntax error never reaches name resolution — so most statements were refused
+before SQL Server looked at whether their tables existed. The other eighteen
+came from reading every `ADD COLUMN` in the storefront's migrations and
+checking each against the entities. The last one, `GoodsCategory.markupMinAmount`,
+was found by neither: it belongs to a table that did not exist yet when the
+audit ran, and only appeared once the table did.
 
-The model has to be completed first: everything below is verified against the
-schema the model produces, and a schema missing a third of its tables verifies
-nothing.
+Two more dialect differences turned up in the constraints while writing this.
+PostgreSQL states a pairing as an equality between two comparisons —
+`("markupType" IS NULL) = ("markupValue" IS NULL)` — which reads naturally
+because a comparison there is a value of type boolean. SQL Server has no
+boolean type at all: a comparison is a condition, not a value, and there is
+nothing to put on either side of that `=`. Both became the disjunction they
+mean.
 
 ### 2. The dialect
 
 `node tools/sql-dialect-check.mjs` extracts all 173 raw statements, replaces
-each `{interpolation}` with a parameter, and writes a batch that asks SQL
+each `{interpolation}` with NULL, and writes a batch that asks SQL
 Server to parse and bind every one of them under `SET NOEXEC ON` — so names
 are checked and nothing runs. Today:
 
-> **134 of 172 statements SQL Server refuses.**
+> **108 of 172 statements SQL Server refuses**, down from 134, and every one of
+> the remaining failures is dialect rather than a missing name. Sixty-four
+> already pass unchanged.
 
 What is in them, counted in the SQL itself:
 

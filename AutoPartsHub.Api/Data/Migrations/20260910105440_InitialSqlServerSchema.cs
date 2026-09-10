@@ -45,6 +45,30 @@ namespace AutoPartsHub.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "GoodsCategory",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    name = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    slug = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    description = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    markupType = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    markupValue = table.Column<double>(type: "float", nullable: true),
+                    markupMinAmount = table.Column<double>(type: "float", nullable: true),
+                    sortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("GoodsCategory_pkey", x => x.id);
+                    table.CheckConstraint("GoodsCategory_floor_matches_type", "(\"markupMinAmount\" IS NULL\n AND (\"markupType\" IS NULL OR \"markupType\" <> 'PERCENT_MIN'))\nOR (\"markupMinAmount\" IS NOT NULL AND \"markupType\" = 'PERCENT_MIN')");
+                    table.CheckConstraint("GoodsCategory_floor_positive", "\"markupMinAmount\" IS NULL OR \"markupMinAmount\" >= 0");
+                    table.CheckConstraint("GoodsCategory_markup_complete", "(\"markupType\" IS NULL AND \"markupValue\" IS NULL)\nOR (\"markupType\" IS NOT NULL AND \"markupValue\" IS NOT NULL)");
+                    table.CheckConstraint("GoodsCategory_markupType_known", "\"markupType\" IS NULL\nOR \"markupType\" IN ('PERCENT', 'AMOUNT', 'FIXED', 'PERCENT_MIN')");
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Manufacturer",
                 columns: table => new
                 {
@@ -73,7 +97,8 @@ namespace AutoPartsHub.Api.Data.Migrations
                     startsAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
                     endsAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    goodsCategoryId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -90,11 +115,28 @@ namespace AutoPartsHub.Api.Data.Migrations
                     active = table.Column<bool>(type: "bit", nullable: false),
                     sourceName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false)
+                    updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false),
+                    markupPercent = table.Column<double>(type: "float", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PriceList_pkey", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "SearchMiss",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    term = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    narrowed = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
+                    searches = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
+                    firstSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    lastSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("SearchMiss_pkey", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -124,6 +166,31 @@ namespace AutoPartsHub.Api.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("VehicleSystem_pkey", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "VinLookup",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    pattern = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    wmi = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    modelYear = table.Column<int>(type: "int", nullable: true),
+                    makeName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    candidateCount = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    lookups = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
+                    firstSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    lastSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    decodedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
+                    decoded = table.Column<bool>(type: "bit", nullable: true),
+                    decodedModel = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    decodedTrim = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    decodedEngine = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    decoderStatus = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("VinLookup_pkey", x => x.id);
                 });
 
             migrationBuilder.CreateTable(
@@ -161,7 +228,10 @@ namespace AutoPartsHub.Api.Data.Migrations
                     defaultStockDays = table.Column<int>(type: "int", nullable: true),
                     purchaseCurrencyId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
-                    approvedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true)
+                    approvedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
+                    markupPercent = table.Column<double>(type: "float", nullable: true),
+                    minOrderAmount = table.Column<double>(type: "float", nullable: false, defaultValue: 0.0),
+                    priority = table.Column<int>(type: "int", nullable: false, defaultValue: 0)
                 },
                 constraints: table =>
                 {
@@ -196,6 +266,35 @@ namespace AutoPartsHub.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PriceListImport",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    priceListId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    listName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    sourceName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    uploadedById = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    uploadedByName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    outcome = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    rowsSent = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    accepted = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    rejected = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    rejectedStored = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    error = table.Column<string>(type: "nvarchar(4000)", maxLength: 4000, nullable: true),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PriceListImport_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "PriceListImport_priceListId_fkey",
+                        column: x => x.priceListId,
+                        principalTable: "PriceList",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.SetNull);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "VehicleModel",
                 columns: table => new
                 {
@@ -204,7 +303,8 @@ namespace AutoPartsHub.Api.Data.Migrations
                     name = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     yearFrom = table.Column<int>(type: "int", nullable: false),
                     yearTo = table.Column<int>(type: "int", nullable: true),
-                    tecDocId = table.Column<int>(type: "int", nullable: true)
+                    tecDocId = table.Column<int>(type: "int", nullable: true),
+                    series = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -303,11 +403,22 @@ namespace AutoPartsHub.Api.Data.Migrations
                     stockDays = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
                     createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
                     supplierId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
-                    tecDocId = table.Column<int>(type: "int", nullable: true)
+                    tecDocId = table.Column<int>(type: "int", nullable: true),
+                    goodsCategoryId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    packagingUnit = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValue: "piece"),
+                    partType = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValue: "aftermarket"),
+                    quantityPerPackage = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
+                    weightGrams = table.Column<int>(type: "int", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("Product_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "Product_goodsCategoryId_fkey",
+                        column: x => x.goodsCategoryId,
+                        principalTable: "GoodsCategory",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
                         name: "Product_manufacturerId_fkey",
                         column: x => x.manufacturerId,
@@ -329,6 +440,29 @@ namespace AutoPartsHub.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "PriceListImportRow",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    importId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    line = table.Column<int>(type: "int", nullable: false),
+                    partNumber = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    price = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    currency = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    reason = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PriceListImportRow_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "PriceListImportRow_importId_fkey",
+                        column: x => x.importId,
+                        principalTable: "PriceListImport",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "VehicleVariant",
                 columns: table => new
                 {
@@ -340,7 +474,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                     fuel = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'diesel'"),
                     yearFrom = table.Column<int>(type: "int", nullable: false),
                     yearTo = table.Column<int>(type: "int", nullable: true),
-                    tecDocId = table.Column<int>(type: "int", nullable: true)
+                    tecDocId = table.Column<int>(type: "int", nullable: true),
+                    bodyType = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    region = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    steeringSide = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    transmission = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -407,7 +545,14 @@ namespace AutoPartsHub.Api.Data.Migrations
                     status = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'order_is_sent'"),
                     createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
                     currencyCode = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'EUR'"),
-                    currencyRate = table.Column<double>(type: "float", nullable: false, defaultValue: 1.0)
+                    currencyRate = table.Column<double>(type: "float", nullable: false, defaultValue: 1.0),
+                    carrier = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    statusChangedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
+                    statusChangedById = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    statusReason = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    trackingNumber = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    weightComplete = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
+                    weightGrams = table.Column<int>(type: "int", nullable: false, defaultValue: 0)
                 },
                 constraints: table =>
                 {
@@ -474,7 +619,9 @@ namespace AutoPartsHub.Api.Data.Migrations
                     productId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     price = table.Column<double>(type: "float", nullable: false),
                     sourcePrice = table.Column<double>(type: "float", nullable: true),
-                    sourceCurrency = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
+                    sourceCurrency = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    markupPercent = table.Column<double>(type: "float", nullable: true),
+                    sourcePartNumber = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
                 },
                 constraints: table =>
                 {
@@ -487,6 +634,28 @@ namespace AutoPartsHub.Api.Data.Migrations
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
                         name: "PriceListItem_productId_fkey",
+                        column: x => x.productId,
+                        principalTable: "Product",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ProductBarcode",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    productId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    code = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    kind = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValue: "other"),
+                    sortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("ProductBarcode_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "ProductBarcode_productId_fkey",
                         column: x => x.productId,
                         principalTable: "Product",
                         principalColumn: "id",
@@ -509,6 +678,29 @@ namespace AutoPartsHub.Api.Data.Migrations
                     table.PrimaryKey("ProductImage_pkey", x => x.id);
                     table.ForeignKey(
                         name: "ProductImage_productId_fkey",
+                        column: x => x.productId,
+                        principalTable: "Product",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "ProductSpec",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    productId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    label = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    value = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    unit = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    sortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("ProductSpec_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "ProductSpec_productId_fkey",
                         column: x => x.productId,
                         principalTable: "Product",
                         principalColumn: "id",
@@ -540,6 +732,37 @@ namespace AutoPartsHub.Api.Data.Migrations
                         name: "StockLevel_warehouseId_fkey",
                         column: x => x.warehouseId,
                         principalTable: "Warehouse",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "SupplierOffer",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    productId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    supplierId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    purchasePrice = table.Column<double>(type: "float", nullable: false),
+                    stockDays = table.Column<int>(type: "int", nullable: true),
+                    supplierPartNumber = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("SupplierOffer_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "SupplierOffer_productId_fkey",
+                        column: x => x.productId,
+                        principalTable: "Product",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "SupplierOffer_supplierId_fkey",
+                        column: x => x.supplierId,
+                        principalTable: "Supplier",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -625,6 +848,35 @@ namespace AutoPartsHub.Api.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "Ticket",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    reference = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    clientId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    orderId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    subject = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    status = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValue: "open"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    lastMessageAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("Ticket_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "Ticket_clientId_fkey",
+                        column: x => x.clientId,
+                        principalTable: "Client",
+                        principalColumn: "id");
+                    table.ForeignKey(
+                        name: "Ticket_orderId_fkey",
+                        column: x => x.orderId,
+                        principalTable: "Order",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.SetNull);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "OrderItemAllocation",
                 columns: table => new
                 {
@@ -648,6 +900,30 @@ namespace AutoPartsHub.Api.Data.Migrations
                         principalTable: "Warehouse",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "TicketMessage",
+                columns: table => new
+                {
+                    id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    ticketId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    authorId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
+                    authorName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
+                    fromStaff = table.Column<bool>(type: "bit", nullable: false),
+                    @internal = table.Column<bool>(name: "internal", type: "bit", nullable: false, defaultValue: false),
+                    body = table.Column<string>(type: "nvarchar(4000)", maxLength: 4000, nullable: false),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("TicketMessage_pkey", x => x.id);
+                    table.ForeignKey(
+                        name: "TicketMessage_ticketId_fkey",
+                        column: x => x.ticketId,
+                        principalTable: "Ticket",
+                        principalColumn: "id",
+                        onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateIndex(
@@ -718,6 +994,12 @@ namespace AutoPartsHub.Api.Data.Migrations
                 column: "variantId");
 
             migrationBuilder.CreateIndex(
+                name: "GoodsCategory_slug_key",
+                table: "GoodsCategory",
+                column: "slug",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "Interchange_isOEM_idx",
                 table: "Interchange",
                 column: "isOEM");
@@ -784,6 +1066,21 @@ namespace AutoPartsHub.Api.Data.Migrations
                 filter: "([active] = 1)");
 
             migrationBuilder.CreateIndex(
+                name: "PriceListImport_createdAt_idx",
+                table: "PriceListImport",
+                column: "createdAt");
+
+            migrationBuilder.CreateIndex(
+                name: "PriceListImport_priceListId_idx",
+                table: "PriceListImport",
+                column: "priceListId");
+
+            migrationBuilder.CreateIndex(
+                name: "PriceListImportRow_importId_line_idx",
+                table: "PriceListImportRow",
+                columns: new[] { "importId", "line" });
+
+            migrationBuilder.CreateIndex(
                 name: "PriceListItem_priceListId_productId_key",
                 table: "PriceListItem",
                 columns: new[] { "priceListId", "productId" },
@@ -805,10 +1102,20 @@ namespace AutoPartsHub.Api.Data.Migrations
                 column: "vehicleSystemId");
 
             migrationBuilder.CreateIndex(
+                name: "Product_goodsCategoryId_idx",
+                table: "Product",
+                column: "goodsCategoryId");
+
+            migrationBuilder.CreateIndex(
                 name: "Product_partNumber_key",
                 table: "Product",
                 column: "partNumber",
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "Product_partType_idx",
+                table: "Product",
+                column: "partType");
 
             migrationBuilder.CreateIndex(
                 name: "Product_supplierId_idx",
@@ -823,8 +1130,24 @@ namespace AutoPartsHub.Api.Data.Migrations
                 filter: "[tecDocId] IS NOT NULL");
 
             migrationBuilder.CreateIndex(
+                name: "ProductBarcode_code_key",
+                table: "ProductBarcode",
+                column: "code",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "ProductBarcode_productId_sortOrder_idx",
+                table: "ProductBarcode",
+                columns: new[] { "productId", "sortOrder" });
+
+            migrationBuilder.CreateIndex(
                 name: "ProductImage_productId_sortOrder_idx",
                 table: "ProductImage",
+                columns: new[] { "productId", "sortOrder" });
+
+            migrationBuilder.CreateIndex(
+                name: "ProductSpec_productId_sortOrder_idx",
+                table: "ProductSpec",
                 columns: new[] { "productId", "sortOrder" });
 
             migrationBuilder.CreateIndex(
@@ -837,6 +1160,17 @@ namespace AutoPartsHub.Api.Data.Migrations
                 name: "RetailOutlet_warehouseId_idx",
                 table: "RetailOutlet",
                 column: "warehouseId");
+
+            migrationBuilder.CreateIndex(
+                name: "SearchMiss_lastSeenAt_idx",
+                table: "SearchMiss",
+                column: "lastSeenAt");
+
+            migrationBuilder.CreateIndex(
+                name: "SearchMiss_term_narrowed_key",
+                table: "SearchMiss",
+                columns: new[] { "term", "narrowed" },
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "StockLevel_productId_warehouseId_key",
@@ -886,6 +1220,43 @@ namespace AutoPartsHub.Api.Data.Migrations
                 table: "Supplier",
                 column: "active",
                 filter: "([active] = 0)");
+
+            migrationBuilder.CreateIndex(
+                name: "SupplierOffer_productId_supplierId_key",
+                table: "SupplierOffer",
+                columns: new[] { "productId", "supplierId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "SupplierOffer_supplierId_idx",
+                table: "SupplierOffer",
+                column: "supplierId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Ticket_orderId",
+                table: "Ticket",
+                column: "orderId");
+
+            migrationBuilder.CreateIndex(
+                name: "Ticket_clientId_idx",
+                table: "Ticket",
+                column: "clientId");
+
+            migrationBuilder.CreateIndex(
+                name: "Ticket_reference_key",
+                table: "Ticket",
+                column: "reference",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "Ticket_status_lastMessageAt_idx",
+                table: "Ticket",
+                columns: new[] { "status", "lastMessageAt" });
+
+            migrationBuilder.CreateIndex(
+                name: "TicketMessage_ticketId_createdAt_idx",
+                table: "TicketMessage",
+                columns: new[] { "ticketId", "createdAt" });
 
             migrationBuilder.CreateIndex(
                 name: "VehicleMake_name_key",
@@ -944,6 +1315,17 @@ namespace AutoPartsHub.Api.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "VinLookup_pattern_key",
+                table: "VinLookup",
+                column: "pattern",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "VinLookup_wmi_idx",
+                table: "VinLookup",
+                column: "wmi");
+
+            migrationBuilder.CreateIndex(
                 name: "Warehouse_code_key",
                 table: "Warehouse",
                 column: "code",
@@ -972,19 +1354,40 @@ namespace AutoPartsHub.Api.Data.Migrations
                 name: "OrderItemAllocation");
 
             migrationBuilder.DropTable(
+                name: "PriceListImportRow");
+
+            migrationBuilder.DropTable(
                 name: "PriceListItem");
+
+            migrationBuilder.DropTable(
+                name: "ProductBarcode");
 
             migrationBuilder.DropTable(
                 name: "ProductImage");
 
             migrationBuilder.DropTable(
+                name: "ProductSpec");
+
+            migrationBuilder.DropTable(
                 name: "RetailOutlet");
+
+            migrationBuilder.DropTable(
+                name: "SearchMiss");
 
             migrationBuilder.DropTable(
                 name: "StockLevel");
 
             migrationBuilder.DropTable(
+                name: "SupplierOffer");
+
+            migrationBuilder.DropTable(
+                name: "TicketMessage");
+
+            migrationBuilder.DropTable(
                 name: "VerificationToken");
+
+            migrationBuilder.DropTable(
+                name: "VinLookup");
 
             migrationBuilder.DropTable(
                 name: "Cart");
@@ -999,31 +1402,40 @@ namespace AutoPartsHub.Api.Data.Migrations
                 name: "OrderItem");
 
             migrationBuilder.DropTable(
-                name: "PriceList");
+                name: "PriceListImport");
 
             migrationBuilder.DropTable(
                 name: "Warehouse");
 
             migrationBuilder.DropTable(
-                name: "VehicleModel");
+                name: "Ticket");
 
             migrationBuilder.DropTable(
-                name: "Order");
+                name: "VehicleModel");
 
             migrationBuilder.DropTable(
                 name: "Product");
 
             migrationBuilder.DropTable(
+                name: "PriceList");
+
+            migrationBuilder.DropTable(
+                name: "Order");
+
+            migrationBuilder.DropTable(
                 name: "VehicleMake");
 
             migrationBuilder.DropTable(
-                name: "Client");
+                name: "GoodsCategory");
 
             migrationBuilder.DropTable(
                 name: "Manufacturer");
 
             migrationBuilder.DropTable(
                 name: "VehicleSystem");
+
+            migrationBuilder.DropTable(
+                name: "Client");
 
             migrationBuilder.DropTable(
                 name: "ClientCategory");

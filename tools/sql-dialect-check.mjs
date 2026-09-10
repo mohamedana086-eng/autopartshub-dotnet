@@ -52,27 +52,28 @@ function walk(dir) {
 const lineAt = (text, index) => 1 + (text.slice(0, index).match(/\n/g)?.length ?? 0);
 
 /**
- * The C# holes become parameters.
+ * The C# holes become NULL.
  *
- * Every `{expr}` in an interpolated SQL string is a parameter at runtime, so
- * replacing it with one is what the server would see. They are declared as
- * sql_variant so that no substitution implies a type the original did not —
- * the point is to check the statement, not to guess what C# was passing.
+ * Every `{expr}` in an interpolated SQL string is a parameter at runtime. The
+ * obvious substitution is a declared parameter, and it was the first thing
+ * tried — but a parameter has to be declared as some type, and every type is
+ * a guess about what C# was passing. Declaring them `sql_variant` produced
+ * twenty-seven conversion errors that say nothing about the statement and
+ * everything about the placeholder.
  *
- * A `{expr}::text[]` keeps its cast for now, deliberately: that IS the
- * PostgreSQL that has to go, and hiding it here would hide the work.
+ * NULL has no type and converts to anything, so it disappears from the
+ * diagnosis entirely. It is untyped in exactly the way a real parameter is
+ * not, which is fine here: this pass checks shape and names, and a comparison
+ * against NULL has the same shape as a comparison against anything else.
+ *
+ * A `{expr}::text[]` keeps its cast, deliberately: that IS the PostgreSQL
+ * that has to go, and hiding it here would hide the work.
  */
 function parameterise(sql) {
-  let n = 0;
-  const names = [];
   // Nested braces do not occur in these strings; interpolations are simple
   // expressions. `{{` is an escaped brace and is left alone.
-  const text = sql.replace(/(?<!\{)\{([^{}]+)\}/g, () => {
-    const name = `@p${n++}`;
-    names.push(name);
-    return name;
-  });
-  return { text, names };
+  const text = sql.replace(/(?<!\{)\{([^{}]+)\}/g, 'NULL');
+  return { text, names: [] };
 }
 
 const statements = [];

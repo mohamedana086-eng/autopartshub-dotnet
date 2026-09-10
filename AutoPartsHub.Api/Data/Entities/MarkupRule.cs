@@ -43,6 +43,8 @@ public partial class MarkupRule
 
     public DateTime CreatedAt { get; set; }
 
+    public string? GoodsCategoryId { get; set; }
+
     /// <summary>
     /// What this rule narrows on. All the conditions sharing a dimension are
     /// one statement with several acceptable answers.

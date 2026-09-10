@@ -76,18 +76,67 @@ public class SchemaTests : IAsyncLifetime
         Assert.True(counted >= 0);
     }
 
+    /// <remarks>
+    /// Counted from the model rather than against a number written here. A
+    /// hard-coded count is a test that has to be edited every time an entity is
+    /// added, and one that gets edited to whatever the failure said.
+    /// </remarks>
     [SqlServerFact]
     public async Task EveryTableTheModelDeclaresIsThere()
     {
-        var tables = await _db.Database
-            .SqlQuery<string>($"""SELECT name AS "Value" FROM sys.tables WHERE name <> '__EFMigrationsHistory'""")
-            .ToListAsync();
+        var declared = _db.Model.GetEntityTypes()
+            .Select(e => e.GetTableName())
+            .Where(name => name is not null)
+            .Distinct()
+            .ToList();
 
-        Assert.Equal(27, tables.Count);
-        foreach (var expected in new[] { "Product", "Supplier", "Client", "Order", "MarkupRule", "PriceList" })
+        var inDatabase = (await _db.Database
+            .SqlQuery<string>($"""SELECT name AS "Value" FROM sys.tables WHERE name <> '__EFMigrationsHistory'""")
+            .ToListAsync()).ToHashSet();
+
+        var absent = declared.Where(name => !inDatabase.Contains(name!)).ToList();
+
+        Assert.True(absent.Count == 0, $"declared and not created: {string.Join(", ", absent)}");
+        Assert.True(declared.Count > 30, $"only {declared.Count} tables in the model");
+    }
+
+    /// <remarks>
+    /// The scaffolded model was missing eleven tables the application queries
+    /// every day, and nothing said so — raw SQL does not consult the model, and
+    /// against PostgreSQL the columns really were there. This is the assertion
+    /// that would have said so, and it is named after what it is for.
+    /// </remarks>
+    [SqlServerFact]
+    public async Task TheTablesTheScaffoldMissedAreThereToo()
+    {
+        var inDatabase = (await _db.Database
+            .SqlQuery<string>($"""SELECT name AS "Value" FROM sys.tables""")
+            .ToListAsync()).ToHashSet();
+
+        foreach (var late in new[]
         {
-            Assert.Contains(expected, tables);
+            "ProductSpec", "ProductBarcode", "GoodsCategory", "VinLookup", "SearchMiss",
+            "SupplierOffer", "Ticket", "TicketMessage", "PriceListImport", "PriceListImportRow",
+        })
+        {
+            Assert.Contains(late, inDatabase);
         }
+    }
+
+    /// <remarks>
+    /// The only view, and the only place PostgreSQL's <c>DISTINCT ON</c> had to
+    /// become something else. Asserted through the mapped entity rather than
+    /// through <c>sys.views</c>, so that the rewrite is checked for producing
+    /// the columns the application reads and not merely for existing.
+    /// </remarks>
+    [SqlServerFact]
+    public async Task TheBestOfferViewAnswers()
+    {
+        var offers = await _db.BestOffers.ToListAsync();
+
+        // Nothing is seeded, so the answer is empty — the point is that the
+        // view parses, binds and projects the six columns the entity declares.
+        Assert.Empty(offers);
     }
 
     /// <remarks>

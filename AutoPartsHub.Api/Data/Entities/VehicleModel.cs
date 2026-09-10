@@ -17,6 +17,8 @@ public partial class VehicleModel
 
     public int? TecDocId { get; set; }
 
+    public string? Series { get; set; }
+
     public virtual VehicleMake Make { get; set; } = null!;
 
     public virtual ICollection<VehicleVariant> VehicleVariants { get; set; } = new List<VehicleVariant>();

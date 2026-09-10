@@ -17,6 +17,10 @@ public partial class PriceListItem
 
     public string? SourceCurrency { get; set; }
 
+    public double? MarkupPercent { get; set; }
+
+    public string? SourcePartNumber { get; set; }
+
     public virtual PriceList PriceList { get; set; } = null!;
 
     public virtual Product Product { get; set; } = null!;

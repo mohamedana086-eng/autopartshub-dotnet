@@ -71,6 +71,9 @@ public partial class AutoPartsContext
 
     partial void OnModelCreatingPartial(ModelBuilder modelBuilder)
     {
+        // The eleven tables and twenty-four columns the scaffold never saw.
+        ConfigureLateSchema(modelBuilder);
+
         // The handful that are genuinely long. Everything not named here is
         // a name, a code, a status or a city, and fits in 400 with room.
         modelBuilder.Entity<Entities.Fitment>().Property(e => e.Note).HasMaxLength(LongText);

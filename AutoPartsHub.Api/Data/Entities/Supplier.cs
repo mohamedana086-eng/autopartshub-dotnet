@@ -33,8 +33,13 @@ public partial class Supplier
 
     public DateTime? ApprovedAt { get; set; }
 
-    public virtual ICollection<Client> Clients { get; set; } = new List<Client>();
+    public double? MarkupPercent { get; set; }
 
+    public double MinOrderAmount { get; set; }
+
+    public int Priority { get; set; }
+
+    public virtual ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public virtual ICollection<Product> Products { get; set; } = new List<Product>();
 

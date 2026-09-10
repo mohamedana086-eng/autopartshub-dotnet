@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AutoPartsHub.Api.Data.Migrations
 {
     [DbContext(typeof(AutoPartsContext))]
-    [Migration("20260910101517_InitialSqlServerSchema")]
+    [Migration("20260910105440_InitialSqlServerSchema")]
     partial class InitialSqlServerSchema
     {
         /// <inheritdoc />
@@ -24,6 +24,45 @@ namespace AutoPartsHub.Api.Data.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.BestOffer", b =>
+                {
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("productId");
+
+                    b.Property<double>("PurchasePrice")
+                        .HasColumnType("float")
+                        .HasColumnName("purchasePrice");
+
+                    b.Property<int?>("StockDays")
+                        .HasColumnType("int")
+                        .HasColumnName("stockDays");
+
+                    b.Property<string>("SupplierCode")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("supplierCode");
+
+                    b.Property<string>("SupplierId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("supplierId");
+
+                    b.Property<string>("SupplierName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("supplierName");
+
+                    b.ToTable((string)null);
+
+                    b.ToView("BestOffer", (string)null);
+                });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Cart", b =>
                 {
@@ -318,6 +357,80 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.ToTable("Fitment", (string)null);
                 });
 
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.GoodsCategory", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("active");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("description");
+
+                    b.Property<double?>("MarkupMinAmount")
+                        .HasColumnType("float")
+                        .HasColumnName("markupMinAmount");
+
+                    b.Property<string>("MarkupType")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("markupType");
+
+                    b.Property<double?>("MarkupValue")
+                        .HasColumnType("float")
+                        .HasColumnName("markupValue");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("slug");
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("sortOrder");
+
+                    b.HasKey("Id")
+                        .HasName("GoodsCategory_pkey");
+
+                    b.HasIndex(new[] { "Slug" }, "GoodsCategory_slug_key")
+                        .IsUnique();
+
+                    b.ToTable("GoodsCategory", null, t =>
+                        {
+                            t.HasCheckConstraint("GoodsCategory_floor_matches_type", "(\"markupMinAmount\" IS NULL\n AND (\"markupType\" IS NULL OR \"markupType\" <> 'PERCENT_MIN'))\nOR (\"markupMinAmount\" IS NOT NULL AND \"markupType\" = 'PERCENT_MIN')");
+
+                            t.HasCheckConstraint("GoodsCategory_floor_positive", "\"markupMinAmount\" IS NULL OR \"markupMinAmount\" >= 0");
+
+                            t.HasCheckConstraint("GoodsCategory_markupType_known", "\"markupType\" IS NULL\nOR \"markupType\" IN ('PERCENT', 'AMOUNT', 'FIXED', 'PERCENT_MIN')");
+
+                            t.HasCheckConstraint("GoodsCategory_markup_complete", "(\"markupType\" IS NULL AND \"markupValue\" IS NULL)\nOR (\"markupType\" IS NOT NULL AND \"markupValue\" IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Interchange", b =>
                 {
                     b.Property<string>("Id")
@@ -411,6 +524,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("endsAt");
+
+                    b.Property<string>("GoodsCategoryId")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("goodsCategoryId");
 
                     b.Property<string>("Label")
                         .IsRequired()
@@ -568,6 +686,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("id");
 
+                    b.Property<string>("Carrier")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("carrier");
+
                     b.Property<string>("ClientId")
                         .IsRequired()
                         .HasMaxLength(400)
@@ -608,6 +731,38 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("status")
                         .HasDefaultValueSql("'order_is_sent'");
+
+                    b.Property<DateTime?>("StatusChangedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("statusChangedAt");
+
+                    b.Property<string>("StatusChangedById")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("statusChangedById");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("statusReason");
+
+                    b.Property<string>("TrackingNumber")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("trackingNumber");
+
+                    b.Property<bool>("WeightComplete")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("weightComplete");
+
+                    b.Property<int>("WeightGrams")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("weightGrams");
 
                     b.HasKey("Id")
                         .HasName("Order_pkey");
@@ -716,6 +871,10 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(4000)")
                         .HasColumnName("description");
 
+                    b.Property<double?>("MarkupPercent")
+                        .HasColumnType("float")
+                        .HasColumnName("markupPercent");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(400)
@@ -742,12 +901,150 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.ToTable("PriceList", (string)null);
                 });
 
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListImport", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Accepted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("accepted");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)")
+                        .HasColumnName("error");
+
+                    b.Property<string>("ListName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("listName");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("outcome");
+
+                    b.Property<string>("PriceListId")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("priceListId");
+
+                    b.Property<int>("Rejected")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("rejected");
+
+                    b.Property<int>("RejectedStored")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("rejectedStored");
+
+                    b.Property<int>("RowsSent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("rowsSent");
+
+                    b.Property<string>("SourceName")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("sourceName");
+
+                    b.Property<string>("UploadedById")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("uploadedById");
+
+                    b.Property<string>("UploadedByName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("uploadedByName");
+
+                    b.HasKey("Id")
+                        .HasName("PriceListImport_pkey");
+
+                    b.HasIndex(new[] { "CreatedAt" }, "PriceListImport_createdAt_idx");
+
+                    b.HasIndex(new[] { "PriceListId" }, "PriceListImport_priceListId_idx");
+
+                    b.ToTable("PriceListImport", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListImportRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("currency");
+
+                    b.Property<string>("ImportId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("importId");
+
+                    b.Property<int>("Line")
+                        .HasColumnType("int")
+                        .HasColumnName("line");
+
+                    b.Property<string>("PartNumber")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("partNumber");
+
+                    b.Property<string>("Price")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("price");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("reason");
+
+                    b.HasKey("Id")
+                        .HasName("PriceListImportRow_pkey");
+
+                    b.HasIndex(new[] { "ImportId", "Line" }, "PriceListImportRow_importId_line_idx");
+
+                    b.ToTable("PriceListImportRow", (string)null);
+                });
+
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListItem", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("id");
+
+                    b.Property<double?>("MarkupPercent")
+                        .HasColumnType("float")
+                        .HasColumnName("markupPercent");
 
                     b.Property<double>("Price")
                         .HasColumnType("float")
@@ -769,6 +1066,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("sourceCurrency");
+
+                    b.Property<string>("SourcePartNumber")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("sourcePartNumber");
 
                     b.Property<double?>("SourcePrice")
                         .HasColumnType("float")
@@ -816,6 +1118,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(4000)")
                         .HasColumnName("description");
 
+                    b.Property<string>("GoodsCategoryId")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("goodsCategoryId");
+
                     b.Property<string>("ManufacturerId")
                         .IsRequired()
                         .HasMaxLength(400)
@@ -828,11 +1135,33 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("name");
 
+                    b.Property<string>("PackagingUnit")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasDefaultValue("piece")
+                        .HasColumnName("packagingUnit");
+
                     b.Property<string>("PartNumber")
                         .IsRequired()
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("partNumber");
+
+                    b.Property<string>("PartType")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasDefaultValue("aftermarket")
+                        .HasColumnName("partType");
+
+                    b.Property<int>("QuantityPerPackage")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1)
+                        .HasColumnName("quantityPerPackage");
 
                     b.Property<int>("StockDays")
                         .ValueGeneratedOnAdd()
@@ -855,6 +1184,10 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("vehicleSystemId");
 
+                    b.Property<int?>("WeightGrams")
+                        .HasColumnType("int")
+                        .HasColumnName("weightGrams");
+
                     b.HasKey("Id")
                         .HasName("Product_pkey");
 
@@ -862,8 +1195,12 @@ namespace AutoPartsHub.Api.Data.Migrations
 
                     b.HasIndex("VehicleSystemId");
 
+                    b.HasIndex(new[] { "GoodsCategoryId" }, "Product_goodsCategoryId_idx");
+
                     b.HasIndex(new[] { "PartNumber" }, "Product_partNumber_key")
                         .IsUnique();
+
+                    b.HasIndex(new[] { "PartType" }, "Product_partType_idx");
 
                     b.HasIndex(new[] { "SupplierId" }, "Product_supplierId_idx");
 
@@ -872,6 +1209,57 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasFilter("[tecDocId] IS NOT NULL");
 
                     b.ToTable("Product", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.ProductBarcode", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasDefaultValue("other")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("productId");
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("sortOrder");
+
+                    b.HasKey("Id")
+                        .HasName("ProductBarcode_pkey");
+
+                    b.HasIndex(new[] { "Code" }, "ProductBarcode_code_key")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "ProductId", "SortOrder" }, "ProductBarcode_productId_sortOrder_idx");
+
+                    b.ToTable("ProductBarcode", (string)null);
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.ProductImage", b =>
@@ -915,6 +1303,57 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.HasIndex(new[] { "ProductId", "SortOrder" }, "ProductImage_productId_sortOrder_idx");
 
                     b.ToTable("ProductImage", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.ProductSpec", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("label");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("productId");
+
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("sortOrder");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("unit");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id")
+                        .HasName("ProductSpec_pkey");
+
+                    b.HasIndex(new[] { "ProductId", "SortOrder" }, "ProductSpec_productId_sortOrder_idx");
+
+                    b.ToTable("ProductSpec", (string)null);
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.RetailOutlet", b =>
@@ -978,6 +1417,56 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.HasIndex(new[] { "WarehouseId" }, "RetailOutlet_warehouseId_idx");
 
                     b.ToTable("RetailOutlet", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.SearchMiss", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("firstSeenAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("lastSeenAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("Narrowed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("narrowed");
+
+                    b.Property<int>("Searches")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1)
+                        .HasColumnName("searches");
+
+                    b.Property<string>("Term")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("term");
+
+                    b.HasKey("Id")
+                        .HasName("SearchMiss_pkey");
+
+                    b.HasIndex(new[] { "LastSeenAt" }, "SearchMiss_lastSeenAt_idx");
+
+                    b.HasIndex(new[] { "Term", "Narrowed" }, "SearchMiss_term_narrowed_key")
+                        .IsUnique();
+
+                    b.ToTable("SearchMiss", (string)null);
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.StockLevel", b =>
@@ -1074,11 +1563,27 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("int")
                         .HasColumnName("guaranteeMonths");
 
+                    b.Property<double?>("MarkupPercent")
+                        .HasColumnType("float")
+                        .HasColumnName("markupPercent");
+
+                    b.Property<double>("MinOrderAmount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("float")
+                        .HasDefaultValue(0.0)
+                        .HasColumnName("minOrderAmount");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("name");
+
+                    b.Property<int>("Priority")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("priority");
 
                     b.Property<string>("PurchaseCurrencyId")
                         .HasMaxLength(400)
@@ -1124,6 +1629,191 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasFilter("([active] = 0)");
 
                     b.ToTable("Supplier", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.SupplierOffer", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("Active")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("active");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("ProductId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("productId");
+
+                    b.Property<double>("PurchasePrice")
+                        .HasColumnType("float")
+                        .HasColumnName("purchasePrice");
+
+                    b.Property<int?>("StockDays")
+                        .HasColumnType("int")
+                        .HasColumnName("stockDays");
+
+                    b.Property<string>("SupplierId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("supplierId");
+
+                    b.Property<string>("SupplierPartNumber")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("supplierPartNumber");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("updatedAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.HasKey("Id")
+                        .HasName("SupplierOffer_pkey");
+
+                    b.HasIndex(new[] { "ProductId", "SupplierId" }, "SupplierOffer_productId_supplierId_key")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "SupplierId" }, "SupplierOffer_supplierId_idx");
+
+                    b.ToTable("SupplierOffer", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Ticket", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ClientId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("clientId");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("LastMessageAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("lastMessageAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("OrderId")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("orderId");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("reference");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasDefaultValue("open")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("subject");
+
+                    b.HasKey("Id")
+                        .HasName("Ticket_pkey");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex(new[] { "ClientId" }, "Ticket_clientId_idx");
+
+                    b.HasIndex(new[] { "Reference" }, "Ticket_reference_key")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "Status", "LastMessageAt" }, "Ticket_status_lastMessageAt_idx");
+
+                    b.ToTable("Ticket", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.TicketMessage", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AuthorId")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("authorId");
+
+                    b.Property<string>("AuthorName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("authorName");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)")
+                        .HasColumnName("body");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("createdAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("FromStaff")
+                        .HasColumnType("bit")
+                        .HasColumnName("fromStaff");
+
+                    b.Property<bool>("Internal")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("internal");
+
+                    b.Property<string>("TicketId")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("ticketId");
+
+                    b.HasKey("Id")
+                        .HasName("TicketMessage_pkey");
+
+                    b.HasIndex(new[] { "TicketId", "CreatedAt" }, "TicketMessage_ticketId_createdAt_idx");
+
+                    b.ToTable("TicketMessage", (string)null);
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.VehicleMake", b =>
@@ -1178,6 +1868,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("name");
+
+                    b.Property<string>("Series")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("series");
 
                     b.Property<int?>("TecDocId")
                         .HasColumnType("int")
@@ -1249,6 +1944,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("nvarchar(400)")
                         .HasColumnName("id");
 
+                    b.Property<string>("BodyType")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("bodyType");
+
                     b.Property<string>("EngineCode")
                         .HasMaxLength(400)
                         .HasColumnType("nvarchar(400)")
@@ -1278,9 +1978,24 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasColumnType("int")
                         .HasColumnName("powerKw");
 
+                    b.Property<string>("Region")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("region");
+
+                    b.Property<string>("SteeringSide")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("steeringSide");
+
                     b.Property<int?>("TecDocId")
                         .HasColumnType("int")
                         .HasColumnName("tecDocId");
+
+                    b.Property<string>("Transmission")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("transmission");
 
                     b.Property<int>("YearFrom")
                         .HasColumnType("int")
@@ -1354,6 +2069,100 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("VerificationToken", (string)null);
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.VinLookup", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("id");
+
+                    b.Property<int>("CandidateCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0)
+                        .HasColumnName("candidateCount");
+
+                    b.Property<bool?>("Decoded")
+                        .HasColumnType("bit")
+                        .HasColumnName("decoded");
+
+                    b.Property<DateTime?>("DecodedAt")
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("decodedAt");
+
+                    b.Property<string>("DecodedEngine")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("decodedEngine");
+
+                    b.Property<string>("DecodedModel")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("decodedModel");
+
+                    b.Property<string>("DecodedTrim")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("decodedTrim");
+
+                    b.Property<string>("DecoderStatus")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("decoderStatus");
+
+                    b.Property<DateTime>("FirstSeenAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("firstSeenAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(3)
+                        .HasColumnType("datetime2(3)")
+                        .HasColumnName("lastSeenAt")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int>("Lookups")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1)
+                        .HasColumnName("lookups");
+
+                    b.Property<string>("MakeName")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("makeName");
+
+                    b.Property<int?>("ModelYear")
+                        .HasColumnType("int")
+                        .HasColumnName("modelYear");
+
+                    b.Property<string>("Pattern")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("pattern");
+
+                    b.Property<string>("Wmi")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)")
+                        .HasColumnName("wmi");
+
+                    b.HasKey("Id")
+                        .HasName("VinLookup_pkey");
+
+                    b.HasIndex(new[] { "Pattern" }, "VinLookup_pattern_key")
+                        .IsUnique();
+
+                    b.HasIndex(new[] { "Wmi" }, "VinLookup_wmi_idx");
+
+                    b.ToTable("VinLookup", (string)null);
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Warehouse", b =>
@@ -1590,6 +2399,29 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.Navigation("Warehouse");
                 });
 
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListImport", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.PriceList", "PriceList")
+                        .WithMany()
+                        .HasForeignKey("PriceListId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("PriceListImport_priceListId_fkey");
+
+                    b.Navigation("PriceList");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListImportRow", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.PriceListImport", "Import")
+                        .WithMany("Rows")
+                        .HasForeignKey("ImportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("PriceListImportRow_importId_fkey");
+
+                    b.Navigation("Import");
+                });
+
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListItem", b =>
                 {
                     b.HasOne("AutoPartsHub.Api.Data.Entities.PriceList", "PriceList")
@@ -1613,6 +2445,12 @@ namespace AutoPartsHub.Api.Data.Migrations
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Product", b =>
                 {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.GoodsCategory", "GoodsCategory")
+                        .WithMany("Products")
+                        .HasForeignKey("GoodsCategoryId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("Product_goodsCategoryId_fkey");
+
                     b.HasOne("AutoPartsHub.Api.Data.Entities.Manufacturer", "Manufacturer")
                         .WithMany("Products")
                         .HasForeignKey("ManufacturerId")
@@ -1633,11 +2471,25 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .IsRequired()
                         .HasConstraintName("Product_vehicleSystemId_fkey");
 
+                    b.Navigation("GoodsCategory");
+
                     b.Navigation("Manufacturer");
 
                     b.Navigation("Supplier");
 
                     b.Navigation("VehicleSystem");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.ProductBarcode", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("ProductBarcode_productId_fkey");
+
+                    b.Navigation("Product");
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.ProductImage", b =>
@@ -1648,6 +2500,18 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("ProductImage_productId_fkey");
+
+                    b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.ProductSpec", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("ProductSpec_productId_fkey");
 
                     b.Navigation("Product");
                 });
@@ -1693,6 +2557,59 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasConstraintName("Supplier_purchaseCurrencyId_fkey");
 
                     b.Navigation("PurchaseCurrency");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.SupplierOffer", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("SupplierOffer_productId_fkey");
+
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Supplier", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("SupplierOffer_supplierId_fkey");
+
+                    b.Navigation("Product");
+
+                    b.Navigation("Supplier");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Ticket", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired()
+                        .HasConstraintName("Ticket_clientId_fkey");
+
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Order", "Order")
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("Ticket_orderId_fkey");
+
+                    b.Navigation("Client");
+
+                    b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.TicketMessage", b =>
+                {
+                    b.HasOne("AutoPartsHub.Api.Data.Entities.Ticket", "Ticket")
+                        .WithMany("Messages")
+                        .HasForeignKey("TicketId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("TicketMessage_ticketId_fkey");
+
+                    b.Navigation("Ticket");
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.VehicleModel", b =>
@@ -1761,6 +2678,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.Navigation("Suppliers");
                 });
 
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.GoodsCategory", b =>
+                {
+                    b.Navigation("Products");
+                });
+
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Manufacturer", b =>
                 {
                     b.Navigation("Products");
@@ -1786,6 +2708,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.Navigation("PriceListItems");
                 });
 
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.PriceListImport", b =>
+                {
+                    b.Navigation("Rows");
+                });
+
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Product", b =>
                 {
                     b.Navigation("CartItems");
@@ -1808,6 +2735,11 @@ namespace AutoPartsHub.Api.Data.Migrations
                     b.Navigation("Clients");
 
                     b.Navigation("Products");
+                });
+
+            modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.Ticket", b =>
+                {
+                    b.Navigation("Messages");
                 });
 
             modelBuilder.Entity("AutoPartsHub.Api.Data.Entities.VehicleMake", b =>
