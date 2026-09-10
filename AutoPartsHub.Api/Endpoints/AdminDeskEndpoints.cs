@@ -14,7 +14,7 @@ namespace AutoPartsHub.Api.Endpoints;
 /// Three of these are scoped, and the scope is a condition inside the query
 /// rather than a filter applied afterwards — a filter is one forgotten return
 /// away from serving the whole customer list. The manager id is passed as a
-/// parameter and the condition spelled <c>{scope}::text IS NULL OR …</c>, so
+/// parameter and the condition spelled <c>{scope} IS NULL OR …</c>, so
 /// admin and salesperson run the same statement and there is no branch where
 /// the narrowing could be dropped.
 /// </remarks>
@@ -39,15 +39,15 @@ public static class AdminDeskEndpoints
             var scope = g.ScopeTo;
 
             var counts = (await db.Database.SqlQuery<DashboardRow>($"""
-                SELECT (SELECT COUNT(*) FROM "Product")::int AS "Products",
+                SELECT (SELECT COUNT(*) FROM "Product") AS "Products",
                        (SELECT COUNT(*) FROM "Client" c
-                         WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
-                       )::int AS "Clients",
+                         WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
+                       ) AS "Clients",
                        (SELECT COUNT(*) FROM "Order" o
                           JOIN "Client" c ON c."id" = o."clientId"
-                         WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
-                       )::int AS "Orders",
-                       (SELECT COUNT(*) FROM "MarkupRule" WHERE "active")::int AS "ActiveRules"
+                         WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
+                       ) AS "Orders",
+                       (SELECT COUNT(*) FROM "MarkupRule" WHERE "active") AS "ActiveRules"
                 """).ToListAsync(ct)).Single();
 
             return Results.Ok(new
@@ -102,7 +102,7 @@ public static class AdminDeskEndpoints
                 FROM "Order" o
                 JOIN "Client" c ON c."id" = o."clientId"
                 WHERE o."id" = {id}
-                  AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+                  AND ({scope} IS NULL OR c."salesManagerId" = {scope})
                 """).ToListAsync(ct);
             if (exists.Count == 0) return Results.NotFound(new { error = "Order not found." });
 
@@ -181,7 +181,7 @@ public static class AdminDeskEndpoints
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>(
-                $"""SELECT COUNT(*)::int AS "Value" FROM "SearchMiss" """).ToListAsync(ct))
+                $"""SELECT COUNT(*) AS "Value" FROM "SearchMiss" """).ToListAsync(ct))
                 .FirstOrDefault();
 
             return Results.Ok(new
@@ -239,24 +239,24 @@ public static class AdminDeskEndpoints
                 FROM "Order" o
                 JOIN "Client" cl ON cl."id" = o."clientId"
                 LEFT JOIN "Client" who ON who."id" = o."statusChangedById"
-                WHERE ({scope}::text IS NULL OR cl."salesManagerId" = {scope})
-                  AND ({f.ManagerId}::text IS NULL OR cl."salesManagerId" = {f.ManagerId})
-                  AND ({f.Status}::text IS NULL OR o."status" = {f.Status})
-                  AND ({f.From}::timestamp IS NULL OR o."createdAt" >= {f.From})
-                  AND ({f.Before}::timestamp IS NULL OR o."createdAt" < {f.Before})
+                WHERE ({scope} IS NULL OR cl."salesManagerId" = {scope})
+                  AND ({f.ManagerId} IS NULL OR cl."salesManagerId" = {f.ManagerId})
+                  AND ({f.Status} IS NULL OR o."status" = {f.Status})
+                  AND ({f.From} IS NULL OR o."createdAt" >= {f.From})
+                  AND ({f.Before} IS NULL OR o."createdAt" < {f.Before})
                 ORDER BY o."createdAt" DESC
                 LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
-                SELECT COUNT(*)::int AS "Value"
+                SELECT COUNT(*) AS "Value"
                 FROM "Order" o
                 JOIN "Client" cl ON cl."id" = o."clientId"
-                WHERE ({scope}::text IS NULL OR cl."salesManagerId" = {scope})
-                  AND ({f.ManagerId}::text IS NULL OR cl."salesManagerId" = {f.ManagerId})
-                  AND ({f.Status}::text IS NULL OR o."status" = {f.Status})
-                  AND ({f.From}::timestamp IS NULL OR o."createdAt" >= {f.From})
-                  AND ({f.Before}::timestamp IS NULL OR o."createdAt" < {f.Before})
+                WHERE ({scope} IS NULL OR cl."salesManagerId" = {scope})
+                  AND ({f.ManagerId} IS NULL OR cl."salesManagerId" = {f.ManagerId})
+                  AND ({f.Status} IS NULL OR o."status" = {f.Status})
+                  AND ({f.From} IS NULL OR o."createdAt" >= {f.From})
+                  AND ({f.Before} IS NULL OR o."createdAt" < {f.Before})
                 """).ToListAsync(ct)).FirstOrDefault();
 
             var ids = orders.Select(o => o.Id).ToArray();
@@ -369,7 +369,7 @@ public static class AdminDeskEndpoints
             var carts = await db.Database.SqlQuery<AdminCartRow>($"""
                 SELECT ct."id" AS "Id", cl."id" AS "ClientId", cl."name" AS "ClientName",
                        cl."email" AS "ClientEmail", ct."updatedAt" AS "UpdatedAt",
-                       lines."units"::int AS "Units", lines."cost" AS "Cost"
+                       lines."units" AS "Units", lines."cost" AS "Cost"
                 FROM "Cart" ct
                 JOIN "Client" cl ON cl."id" = ct."clientId"
                 JOIN LATERAL (
@@ -390,14 +390,14 @@ public static class AdminDeskEndpoints
                   LEFT JOIN LATERAL (
                     SELECT i."price"
                     FROM "PriceListItem" i
-                    JOIN "PriceList" pl ON pl."id" = i."priceListId" AND pl."active"
+                    JOIN "PriceList" pl ON pl."id" = i."priceListId" AND pl."active" = 1
                     WHERE i."productId" = p."id"
                     LIMIT 1
-                  ) pli ON TRUE
+                  ) pli ON 1 = 1
                   WHERE ci."cartId" = ct."id"
-                ) lines ON TRUE
+                ) lines ON 1 = 1
                 WHERE lines."units" IS NOT NULL
-                  AND ({scope}::text IS NULL OR cl."salesManagerId" = {scope})
+                  AND ({scope} IS NULL OR cl."salesManagerId" = {scope})
                 ORDER BY ct."updatedAt" ASC
                 LIMIT {CartLimit}
                 """).ToListAsync(ct);

@@ -240,11 +240,11 @@ public static class CartEndpoints
               ON pli."productId" = p."id"
              AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
             LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+              SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = true
-            ) st ON true
+              WHERE sl."productId" = p."id" AND w."active" = 1 = 1
+            ) st ON 1 = 1
             WHERE c."clientId" = {clientId}
             -- A part whose supplier has been switched off drops out of the
             -- basket the same way a deleted part already does — the JOIN above

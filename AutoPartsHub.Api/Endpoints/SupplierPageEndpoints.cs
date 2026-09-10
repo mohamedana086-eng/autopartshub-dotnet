@@ -32,15 +32,15 @@ public static class SupplierPageEndpoints
                        s."description" AS "Description", s."reliability" AS "Reliability",
                        s."rating" AS "Rating", s."acceptsReturns" AS "AcceptsReturns",
                        s."country" AS "Country", s."guaranteeMonths" AS "GuaranteeMonths",
-                       COUNT(p."id")::int AS "ProductCount",
-                       MIN(p."stockDays")::int AS "FastestDelivery"
+                       COUNT(p."id") AS "ProductCount",
+                       MIN(p."stockDays") AS "FastestDelivery"
                 FROM "Supplier" s
                 LEFT JOIN "Product" p ON p."supplierId" = s."id"
                 WHERE s."slug" = {slug}
                   -- Not found rather than empty: a supplier waiting for
                   -- approval should not have a public page that says who they
                   -- are and lists nothing.
-                  AND s."active"
+                  AND s."active" = 1
                 GROUP BY s."id"
                 """).ToListAsync(ct)).FirstOrDefault();
 
@@ -50,7 +50,7 @@ public static class SupplierPageEndpoints
             // the same way here as they do on the other API — a .NET string
             // sort and a Postgres collation do not agree about case.
             var systems = await db.Database.SqlQuery<SystemCountRow>($"""
-                SELECT v."slug" AS "Slug", v."name" AS "Name", COUNT(*)::int AS "Count"
+                SELECT v."slug" AS "Slug", v."name" AS "Name", COUNT(*) AS "Count"
                 FROM "Product" p
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
                 WHERE p."supplierId" = {supplier.Id}
@@ -59,7 +59,7 @@ public static class SupplierPageEndpoints
                 """).ToListAsync(ct);
 
             var brands = await db.Database.SqlQuery<BrandCountRow>($"""
-                SELECT m."name" AS "Name", COUNT(*)::int AS "Count"
+                SELECT m."name" AS "Name", COUNT(*) AS "Count"
                 FROM "Product" p
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 WHERE p."supplierId" = {supplier.Id}

@@ -49,7 +49,7 @@ public static class MarkupRules
                    r."minAmount" AS "MinAmount",
                    r."startsAt" AS "StartsAt", r."endsAt" AS "EndsAt"
             FROM "MarkupRule" r
-            WHERE ({id}::text IS NULL OR r."id" = {id})
+            WHERE ({id} IS NULL OR r."id" = {id})
             ORDER BY r."specificity" DESC, r."priority" DESC, r."id" ASC
             """).ToListAsync(ct);
 
@@ -72,7 +72,7 @@ public static class MarkupRules
             LEFT JOIN "Client" sm         ON c."dimension" = 'salesManager'   AND sm."id" = c."value"
             LEFT JOIN "PriceList" pl      ON c."dimension" = 'priceList'      AND pl."id" = c."value"
             LEFT JOIN "Currency" cu       ON c."dimension" = 'currency'       AND cu."code" = c."value"
-            WHERE ({id}::text IS NULL OR c."ruleId" = {id})
+            WHERE ({id} IS NULL OR c."ruleId" = {id})
             ORDER BY c."ruleId" ASC, c."dimension" ASC, c."negated" ASC, c."value" ASC
             """).ToListAsync(ct);
 

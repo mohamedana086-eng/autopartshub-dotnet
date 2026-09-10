@@ -52,7 +52,7 @@ public static class AdminOrderWriteEndpoints
                 FROM "Order" o
                 JOIN "Client" c ON c."id" = o."clientId"
                 WHERE o."id" = {id}
-                  AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+                  AND ({scope} IS NULL OR c."salesManagerId" = {scope})
                 """).ToListAsync(ct)).FirstOrDefault();
 
             // Not theirs, or not there. Both answer the same way: to a
@@ -99,13 +99,13 @@ public static class AdminOrderWriteEndpoints
                            "statusChangedAt" = CURRENT_TIMESTAMP,
                            "statusChangedById" = {byId},
                            "trackingNumber" = CASE WHEN {to.TrackingNumber is not null}
-                                                   THEN {to.TrackingNumber}::text
+                                                   THEN {to.TrackingNumber}
                                                    ELSE "trackingNumber" END,
                            "carrier" = CASE WHEN {to.Carrier is not null}
-                                            THEN {to.Carrier}::text
+                                            THEN {to.Carrier}
                                             ELSE "carrier" END
                      WHERE "id" = {id}
-                       AND ({scope}::text IS NULL OR EXISTS (
+                       AND ({scope} IS NULL OR EXISTS (
                              SELECT 1 FROM "Client" c
                               WHERE c."id" = "Order"."clientId"
                                 AND c."salesManagerId" = {scope}

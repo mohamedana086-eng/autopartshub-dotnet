@@ -97,7 +97,7 @@ public static class AdminPriceListWriteEndpoints
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber",
                        COALESCE(a."price", p."basePrice") AS "Cost"
                 FROM "Product" p
-                LEFT JOIN "PriceList" l ON l."active" = TRUE
+                LEFT JOIN "PriceList" l ON l."active" = 1
                 LEFT JOIN "PriceListItem" a ON a."priceListId" = l."id" AND a."productId" = p."id"
                 """).ToListAsync(ct);
 
@@ -107,7 +107,7 @@ public static class AdminPriceListWriteEndpoints
             var interchanges = await db.Database.SqlQuery<InterchangeTargetRow>($"""
                 SELECT "sourceId" AS "ProductId", "targetPartNo" AS "TargetPartNumber"
                 FROM "Interchange"
-                WHERE "exactMatch" = TRUE
+                WHERE "exactMatch" = 1
                 """).ToListAsync(ct);
 
             var currencies = await db.Currencies
@@ -506,16 +506,16 @@ public static class AdminPriceListWriteEndpoints
         if (active == true)
         {
             await db.Database.ExecuteSqlAsync($"""
-                UPDATE "PriceList" SET "active" = FALSE WHERE "active" = TRUE AND "id" <> {id}
+                UPDATE "PriceList" SET "active" = 0 WHERE "active" = 1 AND "id" <> {id}
                 """, ct);
         }
 
         await db.Database.ExecuteSqlAsync($"""
             UPDATE "PriceList"
-               SET "name" = CASE WHEN {nameSent} THEN {name}::text ELSE "name" END,
-                   "description" = CASE WHEN {descriptionSent} THEN {description}::text
+               SET "name" = CASE WHEN {nameSent} THEN {name} ELSE "name" END,
+                   "description" = CASE WHEN {descriptionSent} THEN {description}
                                         ELSE "description" END,
-                   "active" = CASE WHEN {active is not null} THEN {active}::boolean
+                   "active" = CASE WHEN {active is not null} THEN {active}
                                    ELSE "active" END,
                    -- Null is a value here rather than an absence: it is how the
                    -- margin is taken away again, so the CASE asks whether the
@@ -537,12 +537,12 @@ public static class AdminPriceListWriteEndpoints
             SELECT l."id" AS "Id", l."name" AS "Name", l."description" AS "Description",
                    l."active" AS "Active", l."sourceName" AS "SourceName",
                    l."markupPercent" AS "MarkupPercent",
-                   n."count"::int AS "ItemCount",
+                   n."count" AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
             LEFT JOIN LATERAL (
               SELECT COUNT(*) AS "count" FROM "PriceListItem" i WHERE i."priceListId" = l."id"
-            ) n ON TRUE
+            ) n ON 1 = 1
             WHERE l."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

@@ -50,8 +50,8 @@ public static class AdminCatalogueWriteEndpoints
                        p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                        p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                        p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
-                       (SELECT COUNT(*)::int FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
-                       (SELECT COUNT(*)::int FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
+                       (SELECT COUNT(*) FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
+                       (SELECT COUNT(*) FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
                        img."url" AS "PrimaryImageUrl",
                        st."stockOnHand" AS "StockOnHand", st."stockAvailable" AS "StockAvailable"
                 FROM "Product" p
@@ -62,20 +62,20 @@ public static class AdminCatalogueWriteEndpoints
                 LEFT JOIN LATERAL (
                   SELECT pi."url" FROM "ProductImage" pi
                   WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
-                ) img ON true
+                ) img ON 1 = 1
                 LEFT JOIN LATERAL (
-                  SELECT SUM(sl."quantity")::int AS "stockOnHand",
-                         SUM(sl."quantity" - sl."reserved")::int AS "stockAvailable"
+                  SELECT SUM(sl."quantity") AS "stockOnHand",
+                         SUM(sl."quantity" - sl."reserved") AS "stockAvailable"
                   FROM "StockLevel" sl WHERE sl."productId" = p."id"
-                ) st ON true
+                ) st ON 1 = 1
                 -- Brand and system are searched deliberately: an admin typing
                 -- "brembo" means the brand, and leaving it out made the filter
                 -- answer nothing for it while the storefront found the parts.
-                WHERE ({term}::text IS NULL
-                   OR p."partNumber" ILIKE {term}
-                   OR p."name" ILIKE {term}
-                   OR m."name" ILIKE {term}
-                   OR v."name" ILIKE {term})
+                WHERE ({term} IS NULL
+                   OR p."partNumber" LIKE {term}
+                   OR p."name" LIKE {term}
+                   OR m."name" LIKE {term}
+                   OR v."name" LIKE {term})
                 ORDER BY v."order" ASC, p."partNumber" ASC
                 LIMIT 300
                 """).ToListAsync(ct);
@@ -380,8 +380,8 @@ public static class AdminCatalogueWriteEndpoints
                    p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                    p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                    p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
-                   (SELECT COUNT(*)::int FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
-                   (SELECT COUNT(*)::int FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
+                   (SELECT COUNT(*) FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
+                   (SELECT COUNT(*) FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
                    img."url" AS "PrimaryImageUrl",
                    st."stockOnHand" AS "StockOnHand", st."stockAvailable" AS "StockAvailable"
             FROM "Product" p
@@ -392,12 +392,12 @@ public static class AdminCatalogueWriteEndpoints
             LEFT JOIN LATERAL (
               SELECT pi."url" FROM "ProductImage" pi
               WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
-            ) img ON true
+            ) img ON 1 = 1
             LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity")::int AS "stockOnHand",
-                     SUM(sl."quantity" - sl."reserved")::int AS "stockAvailable"
+              SELECT SUM(sl."quantity") AS "stockOnHand",
+                     SUM(sl."quantity" - sl."reserved") AS "stockAvailable"
               FROM "StockLevel" sl WHERE sl."productId" = p."id"
-            ) st ON true
+            ) st ON 1 = 1
             WHERE p."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

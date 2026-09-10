@@ -367,11 +367,11 @@ public static class AdminPricingWriteEndpoints
         (await db.Database.SqlQuery<AdminCurrencyRow>($"""
             SELECT c."id" AS "Id", c."code" AS "Code", c."name" AS "Name", c."symbol" AS "Symbol",
                    c."rate" AS "Rate", c."isBase" AS "IsBase", c."active" AS "Active",
-                   n."count"::int AS "ClientCount"
+                   n."count" AS "ClientCount"
             FROM "Currency" c
             LEFT JOIN LATERAL (
               SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."currencyId" = c."id"
-            ) n ON TRUE
+            ) n ON 1 = 1
             WHERE c."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

@@ -51,7 +51,7 @@ public static class TicketEndpoints
                        c."name" AS "ClientName", t."orderId" AS "OrderId",
                        o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                        t."lastMessageAt" AS "LastMessageAt",
-                       (SELECT COUNT(*)::int FROM "TicketMessage" m
+                       (SELECT COUNT(*) FROM "TicketMessage" m
                          WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
@@ -199,23 +199,23 @@ public static class TicketEndpoints
                        c."name" AS "ClientName", t."orderId" AS "OrderId",
                        o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                        t."lastMessageAt" AS "LastMessageAt",
-                       (SELECT COUNT(*)::int FROM "TicketMessage" m
+                       (SELECT COUNT(*) FROM "TicketMessage" m
                          WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
                 LEFT JOIN "Order" o ON o."id" = t."orderId"
-                WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
-                  AND ({status}::text IS NULL OR t."status" = {status})
+                WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
+                  AND ({status} IS NULL OR t."status" = {status})
                 ORDER BY t."lastMessageAt" ASC
                 LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
-                SELECT COUNT(*)::int AS "Value"
+                SELECT COUNT(*) AS "Value"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
-                WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
-                  AND ({status}::text IS NULL OR t."status" = {status})
+                WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
+                  AND ({status} IS NULL OR t."status" = {status})
                 """).ToListAsync(ct)).FirstOrDefault();
 
             return Results.Ok(new
@@ -376,14 +376,14 @@ public static class TicketEndpoints
                    c."name" AS "ClientName", t."orderId" AS "OrderId",
                    o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                    t."lastMessageAt" AS "LastMessageAt",
-                   (SELECT COUNT(*)::int FROM "TicketMessage" m
+                   (SELECT COUNT(*) FROM "TicketMessage" m
                      WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
             FROM "Ticket" t
             JOIN "Client" c ON c."id" = t."clientId"
             LEFT JOIN "Order" o ON o."id" = t."orderId"
             WHERE t."id" = {id}
-              AND ({clientId}::text IS NULL OR t."clientId" = {clientId})
-              AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+              AND ({clientId} IS NULL OR t."clientId" = {clientId})
+              AND ({scope} IS NULL OR c."salesManagerId" = {scope})
             """).ToListAsync(ct);
 
     /// <summary>

@@ -44,11 +44,11 @@ public static class ProductEndpoints
                   ON pli."productId" = p."id"
                  AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
                 LEFT JOIN LATERAL (
-                  SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+                  SELECT SUM(sl."quantity" - sl."reserved") AS "available"
                   FROM "StockLevel" sl
                   JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-                  WHERE sl."productId" = p."id" AND w."active" = true
-                ) st ON true
+                  WHERE sl."productId" = p."id" AND w."active" = 1 = 1
+                ) st ON 1 = 1
                 WHERE p."id" = {id}
                 -- A switched-off supplier's parts are out of the catalogue, so
                 -- this reads as "no such part" rather than showing a page

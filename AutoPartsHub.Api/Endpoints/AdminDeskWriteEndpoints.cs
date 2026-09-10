@@ -165,7 +165,7 @@ public static class AdminDeskWriteEndpoints
                        {(link.Length > 0 ? link : null)}
                 FROM "Client" c
                 WHERE c."id" = {clientId}
-                  AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+                  AND ({scope} IS NULL OR c."salesManagerId" = {scope})
                 """, ct);
 
             // Nothing written: the account does not exist, or is not one of

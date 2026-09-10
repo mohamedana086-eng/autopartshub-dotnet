@@ -205,21 +205,21 @@ public static class SupplierSignupEndpoints
             var suppliers = await db.Database.SqlQuery<WaitingSupplierRow>($"""
                 SELECT s."id" AS "Id", s."code" AS "Code", s."slug" AS "Slug", s."name" AS "Name",
                        s."description" AS "Description", s."country" AS "Country",
-                       n."count"::int AS "ProductCount",
+                       n."count" AS "ProductCount",
                        c."name" AS "ContactName", c."email" AS "ContactEmail",
                        to_char(c."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "SignedUpAt"
                 FROM "Supplier" s
                 LEFT JOIN LATERAL (
                   SELECT COUNT(*) AS "count" FROM "Product" p WHERE p."supplierId" = s."id"
-                ) n ON TRUE
+                ) n ON 1 = 1
                 LEFT JOIN LATERAL (
                   SELECT cl."name", cl."email", cl."createdAt"
                   FROM "Client" cl
                   WHERE cl."supplierId" = s."id"
                   ORDER BY cl."createdAt" ASC
                   LIMIT 1
-                ) c ON TRUE
-                WHERE s."active" = FALSE AND s."approvedAt" IS NULL
+                ) c ON 1 = 1
+                WHERE s."active" = 1 = 0 AND s."approvedAt" IS NULL
                 ORDER BY c."createdAt" ASC NULLS LAST, s."name" ASC
                 """).ToListAsync(ct);
 
@@ -277,7 +277,7 @@ public static class SupplierSignupEndpoints
                 // did not happen twice.
                 await db.Database.ExecuteSqlAsync($"""
                     UPDATE "Supplier"
-                       SET "active" = TRUE,
+                       SET "active" = 1,
                            "approvedAt" = COALESCE("approvedAt", CURRENT_TIMESTAMP)
                      WHERE "id" = {id}
                     """, ct);
@@ -285,7 +285,7 @@ public static class SupplierSignupEndpoints
             else
             {
                 await db.Database.ExecuteSqlAsync(
-                    $"""UPDATE "Supplier" SET "active" = FALSE WHERE "id" = {id}""", ct);
+                    $"""UPDATE "Supplier" SET "active" = 0 WHERE "id" = {id}""", ct);
             }
 
             // The people who have been waiting are the ones who most need to

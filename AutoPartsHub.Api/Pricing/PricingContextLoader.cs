@@ -47,8 +47,8 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             LEFT JOIN "Client" c ON c."id" = {userId}
             LEFT JOIN "ClientCategory" cat
                    ON cat."id" = {categoryId}
-                   OR ({categoryId}::text IS NULL AND cat."name" = 'Retail')
-            LEFT JOIN "Currency" cur ON cur."id" = c."currencyId" AND cur."active"
+                   OR ({categoryId} IS NULL AND cat."name" = 'Retail')
+            LEFT JOIN "Currency" cur ON cur."id" = c."currencyId" AND cur."active" = 1
             LEFT JOIN "Currency" base ON base."isBase"
             LIMIT 1
             """).ToListAsync(ct)).FirstOrDefault();
@@ -89,7 +89,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    c."negated" AS "Negated"
             FROM "MarkupRuleCondition" c
             JOIN "MarkupRule" r ON r."id" = c."ruleId"
-            WHERE r."active"
+            WHERE r."active" = 1
             ORDER BY c."ruleId" ASC, c."dimension" ASC, c."value" ASC
             """).ToListAsync(ct);
 

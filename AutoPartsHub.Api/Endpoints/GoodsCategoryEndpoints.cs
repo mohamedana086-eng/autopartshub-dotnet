@@ -148,7 +148,7 @@ public static class GoodsCategoryEndpoints
         var rows = await db.Database.SqlQuery<ClashRow>($"""
             SELECT "slug" AS "Slug", "name" AS "Name" FROM "GoodsCategory"
             WHERE ("slug" = {slug} OR lower("name") = lower({name}))
-              AND ({exceptId}::text IS NULL OR "id" <> {exceptId})
+              AND ({exceptId} IS NULL OR "id" <> {exceptId})
             LIMIT 1
             """).ToListAsync(ct);
 
@@ -167,17 +167,17 @@ public static class GoodsCategoryEndpoints
                    g."sortOrder" AS "SortOrder", g."active" AS "Active",
                    -- Counted in the query rather than by loading the parts.
                    -- The list wants the number, not the rows behind it.
-                   COALESCE(p."n", 0)::int AS "ProductCount",
-                   COALESCE(r."n", 0)::int AS "RuleCount"
+                   COALESCE(p."n", 0) AS "ProductCount",
+                   COALESCE(r."n", 0) AS "RuleCount"
             FROM "GoodsCategory" g
             LEFT JOIN LATERAL (
               SELECT COUNT(*) AS n FROM "Product" WHERE "goodsCategoryId" = g."id"
-            ) p ON true
+            ) p ON 1 = 1
             LEFT JOIN LATERAL (
               SELECT COUNT(*) AS n FROM "MarkupRuleCondition"
                WHERE "dimension" = 'goodsCategory' AND "value" = g."id"
-            ) r ON true
-            WHERE ({id}::text IS NULL OR g."id" = {id})
+            ) r ON 1 = 1
+            WHERE ({id} IS NULL OR g."id" = {id})
             ORDER BY g."sortOrder" ASC, g."name" ASC
             """).ToListAsync(ct);
 

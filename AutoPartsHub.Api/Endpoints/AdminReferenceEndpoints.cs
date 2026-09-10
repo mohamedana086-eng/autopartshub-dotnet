@@ -40,12 +40,12 @@ public static class AdminReferenceEndpoints
                        s."priority" AS "Priority", s."minOrderAmount" AS "MinOrderAmount",
                        s."markupPercent" AS "MarkupPercent",
                        s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
-                       p."count"::int AS "ProductCount"
+                       p."count" AS "ProductCount"
                 FROM "Supplier" s
                 LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"
                 LEFT JOIN LATERAL (
                   SELECT COUNT(*) AS "count" FROM "Product" pr WHERE pr."supplierId" = s."id"
-                ) p ON TRUE
+                ) p ON 1 = 1
                 ORDER BY s."name" ASC
                 """).ToListAsync(ct);
 
@@ -67,19 +67,19 @@ public static class AdminReferenceEndpoints
             var warehouses = await db.Database.SqlQuery<AdminWarehouseRow>($"""
                 SELECT w."id" AS "Id", w."code" AS "Code", w."name" AS "Name", w."city" AS "City",
                        w."address" AS "Address", w."active" AS "Active", w."priority" AS "Priority",
-                       o."count"::int AS "OutletCount",
-                       s."skus"::int AS "SkuCount",
-                       COALESCE(s."quantity", 0)::int AS "TotalQuantity",
-                       COALESCE(s."reserved", 0)::int AS "TotalReserved"
+                       o."count" AS "OutletCount",
+                       s."skus" AS "SkuCount",
+                       COALESCE(s."quantity", 0) AS "TotalQuantity",
+                       COALESCE(s."reserved", 0) AS "TotalReserved"
                 FROM "Warehouse" w
                 LEFT JOIN LATERAL (
                   SELECT COUNT(*) AS "count" FROM "RetailOutlet" ro WHERE ro."warehouseId" = w."id"
-                ) o ON TRUE
+                ) o ON 1 = 1
                 LEFT JOIN LATERAL (
                   SELECT COUNT(*) AS "skus", SUM(sl."quantity") AS "quantity",
                          SUM(sl."reserved") AS "reserved"
                   FROM "StockLevel" sl WHERE sl."warehouseId" = w."id"
-                ) s ON TRUE
+                ) s ON 1 = 1
                 ORDER BY w."priority" DESC, w."code" ASC
                 """).ToListAsync(ct);
 
@@ -127,11 +127,11 @@ public static class AdminReferenceEndpoints
             var currencies = await db.Database.SqlQuery<AdminCurrencyRow>($"""
                 SELECT c."id" AS "Id", c."code" AS "Code", c."name" AS "Name", c."symbol" AS "Symbol",
                        c."rate" AS "Rate", c."isBase" AS "IsBase", c."active" AS "Active",
-                       n."count"::int AS "ClientCount"
+                       n."count" AS "ClientCount"
                 FROM "Currency" c
                 LEFT JOIN LATERAL (
                   SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."currencyId" = c."id"
-                ) n ON TRUE
+                ) n ON 1 = 1
                 ORDER BY c."isBase" DESC, c."code" ASC
                 """).ToListAsync(ct);
 
@@ -149,11 +149,11 @@ public static class AdminReferenceEndpoints
             var categories = await db.Database.SqlQuery<AdminCategoryRow>($"""
                 SELECT c."id" AS "Id", c."name" AS "Name", c."markupPercent" AS "MarkupPercent",
                        c."minOrderAmount" AS "MinOrderAmount", c."shelfLifeDays" AS "ShelfLifeDays",
-                       n."count"::int AS "ClientCount"
+                       n."count" AS "ClientCount"
                 FROM "ClientCategory" c
                 LEFT JOIN LATERAL (
                   SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."categoryId" = c."id"
-                ) n ON TRUE
+                ) n ON 1 = 1
                 ORDER BY c."markupPercent" ASC
                 """).ToListAsync(ct);
 
@@ -262,7 +262,7 @@ public static class AdminReferenceEndpoints
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
-                SELECT COUNT(*)::int AS "Value" FROM "PriceListImportRow"
+                SELECT COUNT(*) AS "Value" FROM "PriceListImportRow"
                 WHERE "importId" = {importId}
                 """).ToListAsync(ct)).FirstOrDefault();
 
@@ -317,7 +317,7 @@ public static class AdminReferenceEndpoints
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
-                SELECT COUNT(*)::int AS "Value" FROM "PriceListItem" WHERE "priceListId" = {id}
+                SELECT COUNT(*) AS "Value" FROM "PriceListItem" WHERE "priceListId" = {id}
                 """).ToListAsync(ct)).FirstOrDefault();
 
             return Results.Ok(new
@@ -354,7 +354,7 @@ public static class AdminReferenceEndpoints
                 LEFT JOIN "ClientCategory" cat ON cat."id" = c."categoryId"
                 LEFT JOIN "Currency" cur ON cur."id" = c."currencyId"
                 LEFT JOIN "Client" m ON m."id" = c."salesManagerId"
-                WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+                WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
                 ORDER BY c."createdAt" DESC
                 """).ToListAsync(ct);
 
@@ -382,7 +382,7 @@ public static class AdminReferenceEndpoints
         db.Database.SqlQuery<NamedOption>($"""
             SELECT "id" AS "Id", "code" || ' — ' || "name" AS "Name"
             FROM "Currency"
-            WHERE "active" = TRUE
+            WHERE "active" = 1
             ORDER BY "isBase" DESC, "code" ASC
             """).ToListAsync(ct);
 
@@ -391,13 +391,13 @@ public static class AdminReferenceEndpoints
             SELECT l."id" AS "Id", l."name" AS "Name", l."description" AS "Description",
                    l."active" AS "Active", l."sourceName" AS "SourceName",
                    l."markupPercent" AS "MarkupPercent",
-                   n."count"::int AS "ItemCount",
+                   n."count" AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
             LEFT JOIN LATERAL (
               SELECT COUNT(*) AS "count" FROM "PriceListItem" i WHERE i."priceListId" = l."id"
-            ) n ON TRUE
-            WHERE ({id}::text IS NULL OR l."id" = {id})
+            ) n ON 1 = 1
+            WHERE ({id} IS NULL OR l."id" = {id})
             ORDER BY l."active" DESC, l."createdAt" DESC
             """).ToListAsync(ct);
 
@@ -437,16 +437,16 @@ public static class AdminReferenceEndpoints
                    COALESCE(l."active", FALSE) AS "ListActive"
             FROM "PriceListImport" i
             LEFT JOIN "PriceList" l ON l."id" = i."priceListId"
-            WHERE ({id}::text IS NULL OR i."id" = {id})
-              AND ({priceListId}::text IS NULL OR i."priceListId" = {priceListId})
+            WHERE ({id} IS NULL OR i."id" = {id})
+              AND ({priceListId} IS NULL OR i."priceListId" = {priceListId})
             ORDER BY i."createdAt" DESC
             LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
             """).ToListAsync(ct);
 
         var total = (await db.Database.SqlQuery<int>($"""
-            SELECT COUNT(*)::int AS "Value" FROM "PriceListImport" i
-            WHERE ({id}::text IS NULL OR i."id" = {id})
-              AND ({priceListId}::text IS NULL OR i."priceListId" = {priceListId})
+            SELECT COUNT(*) AS "Value" FROM "PriceListImport" i
+            WHERE ({id} IS NULL OR i."id" = {id})
+              AND ({priceListId} IS NULL OR i."priceListId" = {priceListId})
             """).ToListAsync(ct)).FirstOrDefault();
 
         return (rows, total);

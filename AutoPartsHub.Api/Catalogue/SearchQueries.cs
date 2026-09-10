@@ -15,7 +15,7 @@ namespace AutoPartsHub.Api.Catalogue;
 ///
 /// The filters that do belong here are written so a null parameter turns its
 /// own clause off:
-/// <code>AND ({supplier}::text IS NULL OR s."slug" = {supplier})</code>
+/// <code>AND ({supplier} IS NULL OR s."slug" = {supplier})</code>
 /// Every combination is therefore the same statement with the same number of
 /// parameters, which is what lets a search with six optional filters stay one
 /// interpolated-string query — no SQL assembled from strings, and no path
@@ -73,7 +73,7 @@ public sealed class SearchQueries(AutoPartsContext db)
         var partType = rows.PartType is { Length: > 0 } chosen ? chosen : null;
 
         var counted = await db.Database.SqlQuery<CountedSearchRow>($"""
-            SELECT COUNT(*) OVER () ::int AS "Total",
+            SELECT COUNT(*) OVER ()  AS "Total",
                    p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                    p."description" AS "Description", p."stockDays" AS "StockDays",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
@@ -112,16 +112,16 @@ public sealed class SearchQueries(AutoPartsContext db)
               WHERE pi."productId" = p."id"
               ORDER BY pi."sortOrder" ASC
               LIMIT 1
-            ) img ON true
+            ) img ON 1 = 1
             LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+              SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = true
-            ) st ON true
+              WHERE sl."productId" = p."id" AND w."active" = 1 = 1
+            ) st ON 1 = 1
             WHERE (
               -- No query: everything is reachable, and the filters below do the work.
-              {hasQuery}::bool IS NOT TRUE
+              ({hasQuery} IS NULL OR {hasQuery} = 0)
               OR p."id" = ANY({ids}::text[])
               -- Every token has to land somewhere, but not all in the same
               -- column — which is what lets "bosch brake pad" work, with the
@@ -131,28 +131,28 @@ public sealed class SearchQueries(AutoPartsContext db)
               OR NOT EXISTS (
                 SELECT 1 FROM unnest({tokens}::text[]) AS tok
                 WHERE NOT (
-                  p."partNumber" ILIKE '%' || tok || '%'
-                  OR p."name" ILIKE '%' || tok || '%'
-                  OR COALESCE(p."description", '') ILIKE '%' || tok || '%'
-                  OR m."name" ILIKE '%' || tok || '%'
+                  p."partNumber" LIKE '%' + tok + '%'
+                  OR p."name" LIKE '%' + tok + '%'
+                  OR COALESCE(p."description", '') LIKE '%' + tok + '%'
+                  OR m."name" LIKE '%' + tok + '%'
                   OR EXISTS (
                     SELECT 1 FROM "Interchange" i
-                    WHERE i."sourceId" = p."id" AND i."targetPartNo" ILIKE '%' || tok || '%'
+                    WHERE i."sourceId" = p."id" AND i."targetPartNo" LIKE '%' + tok + '%'
                   )
                 )
               )
             )
-            AND ({variant}::text IS NULL OR EXISTS (
+            AND ({variant} IS NULL OR EXISTS (
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
             -- "Their parts" means the parts they OFFER, not the ones their offer
             -- happens to win. A supplier page listing only what we currently buy from
             -- them would hide half their range the day somebody undercut them.
-            AND ({supplier}::text IS NULL OR EXISTS (
+            AND ({supplier} IS NULL OR EXISTS (
               SELECT 1 FROM "SupplierOffer" so
               JOIN "Supplier" ss ON ss."id" = so."supplierId"
-              WHERE so."productId" = p."id" AND so."active" AND ss."active"
+              WHERE so."productId" = p."id" AND so."active" = 1 AND ss."active" = 1
                 AND ss."slug" = {supplier}
             ))
             -- A supplier who is switched off is not selling, so their parts
@@ -169,18 +169,21 @@ public sealed class SearchQueries(AutoPartsContext db)
             )
             -- The row filters. Each cancels itself when its parameter is null,
             -- so every combination is the same statement with the same holes.
-            AND ({system}::text IS NULL OR v."slug" = {system})
-            AND ({manufacturer}::text IS NULL OR lower(m."name") = lower({manufacturer}))
+            AND ({system} IS NULL OR v."slug" = {system})
+            AND ({manufacturer} IS NULL OR lower(m."name") = lower({manufacturer}))
             -- COALESCE rather than a bare comparison: an unrated supplier is
             -- NULL, and NULL >= 4 is null, which drops the row for a reason
             -- nobody reading it could name. Written this way the rule is
             -- legible — unrated counts as zero, so no minimum includes it.
-            AND ({minRating}::int IS NULL OR COALESCE(s."rating", 0) >= {minRating})
-            AND ({reliability}::text IS NULL OR s."reliability" = {reliability})
+            AND ({minRating} IS NULL OR COALESCE(s."rating", 0) >= {minRating})
+            AND ({reliability} IS NULL OR s."reliability" = {reliability})
             -- Only an explicit yes. A supplier whose return terms are
-            -- unrecorded is not evidence that they accept them, and IS TRUE
-            -- says so where a plain equality would leave a null to argue over.
-            AND ({returnsOnly}::bool IS NOT TRUE OR s."acceptsReturns" IS TRUE)
+            -- unrecorded is not evidence that they accept them, so the
+            -- unrecorded case has to read as "no" rather than as a null that
+            -- argues with everything it is compared to. PostgreSQL said that
+            -- with IS TRUE; SQL Server has no such test, so the null is
+            -- handled where it arises.
+            AND (({returnsOnly} IS NULL OR {returnsOnly} = 0) OR (s."acceptsReturns" = 1))
             AND ({partType}::text[] IS NULL OR p."partType" = ANY({partType}::text[]))
             LIMIT {limit}
             """).ToListAsync(ct);
@@ -235,33 +238,33 @@ public sealed class SearchQueries(AutoPartsContext db)
               LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
               LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
               WHERE (
-                {hasQuery}::bool IS NOT TRUE
+                ({hasQuery} IS NULL OR {hasQuery} = 0)
                 OR p."id" = ANY({ids}::text[])
                 OR NOT EXISTS (
                   SELECT 1 FROM unnest({tokens}::text[]) AS tok
                   WHERE NOT (
-                    p."partNumber" ILIKE '%' || tok || '%'
-                    OR p."name" ILIKE '%' || tok || '%'
-                    OR COALESCE(p."description", '') ILIKE '%' || tok || '%'
-                    OR m."name" ILIKE '%' || tok || '%'
+                    p."partNumber" LIKE '%' + tok + '%'
+                    OR p."name" LIKE '%' + tok + '%'
+                    OR COALESCE(p."description", '') LIKE '%' + tok + '%'
+                    OR m."name" LIKE '%' + tok + '%'
                     OR EXISTS (
                       SELECT 1 FROM "Interchange" i
-                      WHERE i."sourceId" = p."id" AND i."targetPartNo" ILIKE '%' || tok || '%'
+                      WHERE i."sourceId" = p."id" AND i."targetPartNo" LIKE '%' + tok + '%'
                     )
                   )
                 )
               )
-              AND ({variant}::text IS NULL OR EXISTS (
+              AND ({variant} IS NULL OR EXISTS (
                 SELECT 1 FROM "Fitment" fit
                 WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
               ))
               -- "Their parts" means the parts they OFFER, not the ones their offer
               -- happens to win. A supplier page listing only what we currently buy from
               -- them would hide half their range the day somebody undercut them.
-              AND ({supplier}::text IS NULL OR EXISTS (
+              AND ({supplier} IS NULL OR EXISTS (
                 SELECT 1 FROM "SupplierOffer" so
                 JOIN "Supplier" ss ON ss."id" = so."supplierId"
-                WHERE so."productId" = p."id" AND so."active" AND ss."active"
+                WHERE so."productId" = p."id" AND so."active" = 1 AND ss."active" = 1
                   AND ss."slug" = {supplier}
               ))
               -- A live offer from a live supplier, or no supplier relationship at all.
@@ -273,31 +276,31 @@ public sealed class SearchQueries(AutoPartsContext db)
               )
             ),
             in_system AS (
-              SELECT * FROM matched WHERE ({system}::text IS NULL OR "systemSlug" = {system})
+              SELECT * FROM matched WHERE ({system} IS NULL OR "systemSlug" = {system})
             )
             SELECT 'system' AS "Kind", "systemSlug" AS "Key", "systemName" AS "Label",
-                   COUNT(*)::int AS "Count"
+                   COUNT(*) AS "Count"
             FROM matched GROUP BY "systemSlug", "systemName"
             UNION ALL
-            SELECT 'brand', "manufacturerName", NULL, COUNT(*)::int FROM in_system
+            SELECT 'brand', "manufacturerName", NULL, COUNT(*) FROM in_system
             GROUP BY "manufacturerName"
             UNION ALL
             -- Per exact rating rather than per threshold, so a caller can build
             -- whichever thresholds it offers by summing downwards. Key 0 is
             -- unrated, kept visible so the gap is obvious rather than dropped.
-            SELECT 'rating', COALESCE("supplierRating", 0)::text, NULL, COUNT(*)::int FROM in_system
+            SELECT 'rating', COALESCE("supplierRating", 0), NULL, COUNT(*) FROM in_system
             GROUP BY COALESCE("supplierRating", 0)
             UNION ALL
-            SELECT 'reliability', "supplierReliability", NULL, COUNT(*)::int FROM in_system
+            SELECT 'reliability', "supplierReliability", NULL, COUNT(*) FROM in_system
             WHERE "supplierReliability" IS NOT NULL GROUP BY "supplierReliability"
             UNION ALL
             -- Counted only among parts that have a supplier at all, matching
             -- the reliability tally beside it: a part with nobody behind it is
             -- not evidence either way about returns.
-            SELECT 'returns', 'yes', NULL, COUNT(*)::int FROM in_system
-            WHERE "supplierReliability" IS NOT NULL AND "supplierAcceptsReturns" IS TRUE
+            SELECT 'returns', 'yes', NULL, COUNT(*) FROM in_system
+            WHERE "supplierReliability" IS NOT NULL AND ("supplierAcceptsReturns" = 1)
             UNION ALL
-            SELECT 'partType', "partType", NULL, COUNT(*)::int FROM in_system GROUP BY "partType"
+            SELECT 'partType', "partType", NULL, COUNT(*) FROM in_system GROUP BY "partType"
             """).ToListAsync(ct);
     }
 
@@ -347,25 +350,25 @@ public sealed class SearchQueries(AutoPartsContext db)
               WHERE pi."productId" = p."id"
               ORDER BY pi."sortOrder" ASC
               LIMIT 1
-            ) img ON true
+            ) img ON 1 = 1
             LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+              SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = true
-            ) st ON true
+              WHERE sl."productId" = p."id" AND w."active" = 1 = 1
+            ) st ON 1 = 1
             WHERE p."id" = ANY({array}::text[])
-            AND ({variant}::text IS NULL OR EXISTS (
+            AND ({variant} IS NULL OR EXISTS (
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
             -- "Their parts" means the parts they OFFER, not the ones their offer
             -- happens to win. A supplier page listing only what we currently buy from
             -- them would hide half their range the day somebody undercut them.
-            AND ({supplier}::text IS NULL OR EXISTS (
+            AND ({supplier} IS NULL OR EXISTS (
               SELECT 1 FROM "SupplierOffer" so
               JOIN "Supplier" ss ON ss."id" = so."supplierId"
-              WHERE so."productId" = p."id" AND so."active" AND ss."active"
+              WHERE so."productId" = p."id" AND so."active" = 1 AND ss."active" = 1
                 AND ss."slug" = {supplier}
             ))
             -- Same rule as the search above. Reached by id rather than by
