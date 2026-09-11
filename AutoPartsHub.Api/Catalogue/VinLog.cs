@@ -71,18 +71,30 @@ public static partial class VinLog
         {
             if (Pattern(vin) is not { } p) return;
 
+            // MERGE with HOLDLOCK, which is SQL Server's ON CONFLICT — see the
+            // note in SearchMisses for why the lock is not optional.
+            //
+            // PostgreSQL's EXCLUDED, the row that would have been inserted, is
+            // `source` here: the values are named once in the USING clause and
+            // both branches read them from it.
             await db.Database.ExecuteSqlAsync($"""
-                INSERT INTO "VinLookup" ("id", "pattern", "wmi", "modelYear", "makeName", "candidateCount")
-                VALUES ({Ids.New()}, {p.Pattern}, {p.Wmi}, {modelYear}, {makeName}, {candidateCount})
-                ON CONFLICT ("pattern") DO UPDATE
-                  SET "lookups" = "VinLookup"."lookups" + 1,
-                      "lastSeenAt" = SYSUTCDATETIME(),
-                      -- Refreshed, because the catalogue grows: the same
-                      -- pattern asked again next month may match a make we did
-                      -- not carry before. The measurement is of what we can
-                      -- answer NOW.
-                      "makeName" = EXCLUDED."makeName",
-                      "candidateCount" = EXCLUDED."candidateCount"
+                MERGE "VinLookup" WITH (HOLDLOCK) AS target
+                USING (VALUES ({p.Pattern}, {p.Wmi}, {modelYear}, {makeName}, {candidateCount}))
+                   AS source("pattern", "wmi", "modelYear", "makeName", "candidateCount")
+                  ON target."pattern" = source."pattern"
+                WHEN MATCHED THEN
+                  UPDATE SET "lookups" = target."lookups" + 1,
+                             "lastSeenAt" = SYSUTCDATETIME(),
+                             -- Refreshed, because the catalogue grows: the same
+                             -- pattern asked again next month may match a make
+                             -- we did not carry before. The measurement is of
+                             -- what we can answer NOW.
+                             "makeName" = source."makeName",
+                             "candidateCount" = source."candidateCount"
+                WHEN NOT MATCHED THEN
+                  INSERT ("id", "pattern", "wmi", "modelYear", "makeName", "candidateCount")
+                  VALUES ({Ids.New()}, source."pattern", source."wmi", source."modelYear",
+                          source."makeName", source."candidateCount");
                 """, ct);
         }
         catch

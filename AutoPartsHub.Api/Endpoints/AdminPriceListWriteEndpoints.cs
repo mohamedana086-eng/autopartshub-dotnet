@@ -402,25 +402,33 @@ public static class AdminPriceListWriteEndpoints
         {
             var chunk = stored.GetRange(at, Math.Min(InsertChunk, stored.Count - at));
 
-            var ids = chunk.Select(_ => Ids.New()).ToArray();
-            var importIds = chunk.Select(_ => id).ToArray();
-            var lines = chunk.Select(r => r.Line).ToArray();
-            var partNumbers = chunk.Select(r => r.PartNumber).ToArray();
-            var prices = chunk.Select(r => r.Price).ToArray();
-            var currencies = chunk.Select(r => r.Currency).ToArray();
-            var reasons = chunk.Select(r => r.Reason).ToArray();
+            var rows = chunk.Select(r => new
+            {
+                id = Ids.New(),
+                importId = id,
+                line = r.Line,
+                partNumber = r.PartNumber,
+                price = r.Price,
+                currency = r.Currency,
+                reason = r.Reason,
+            });
 
+            // Objects rather than the seven parallel arrays PostgreSQL zipped
+            // with unnest — see SqlList.Rows. `price` stays text: these are
+            // the rows a load could not read, and "12,50" is the evidence.
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "PriceListImportRow" ("id", "importId", "line", "partNumber",
                                                   "price", "currency", "reason")
-                SELECT * FROM unnest(
-                  {ids}::text[],
-                  {importIds}::text[],
-                  {lines}::int[],
-                  {partNumbers}::text[],
-                  {prices}::text[],
-                  {currencies}::text[],
-                  {reasons}::text[]
+                SELECT "id", "importId", "line", "partNumber", "price", "currency", "reason"
+                FROM OPENJSON({SqlList.Rows(rows)})
+                WITH (
+                  "id" nvarchar(400) '$.id',
+                  "importId" nvarchar(400) '$.importId',
+                  "line" int '$.line',
+                  "partNumber" nvarchar(400) '$.partNumber',
+                  "price" nvarchar(400) '$.price',
+                  "currency" nvarchar(400) '$.currency',
+                  "reason" nvarchar(400) '$.reason'
                 )
                 """, ct);
         }
@@ -460,25 +468,33 @@ public static class AdminPriceListWriteEndpoints
         {
             var chunk = rows.GetRange(at, Math.Min(InsertChunk, rows.Count - at));
 
-            var ids = chunk.Select(_ => Ids.New()).ToArray();
-            var listIds = chunk.Select(_ => id).ToArray();
-            var productIds = chunk.Select(r => r.ProductId).ToArray();
-            var prices = chunk.Select(r => r.Price).ToArray();
-            var sourcePrices = chunk.Select(r => r.SourcePrice).ToArray();
-            var sourceCurrencies = chunk.Select(r => r.SourceCurrency).ToArray();
-            var sourcePartNumbers = chunk.Select(r => r.SourcePartNumber).ToArray();
+            var items = chunk.Select(r => new
+            {
+                id = Ids.New(),
+                priceListId = id,
+                productId = r.ProductId,
+                price = r.Price,
+                sourcePrice = r.SourcePrice,
+                sourceCurrency = r.SourceCurrency,
+                sourcePartNumber = r.SourcePartNumber,
+            });
 
+            // Objects rather than the seven parallel arrays PostgreSQL zipped
+            // with unnest — see SqlList.Rows.
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "PriceListItem" ("id", "priceListId", "productId", "price",
                                              "sourcePrice", "sourceCurrency", "sourcePartNumber")
-                SELECT * FROM unnest(
-                  {ids}::text[],
-                  {listIds}::text[],
-                  {productIds}::text[],
-                  {prices}::double precision[],
-                  {sourcePrices}::double precision[],
-                  {sourceCurrencies}::text[],
-                  {sourcePartNumbers}::text[]
+                SELECT "id", "priceListId", "productId", "price",
+                       "sourcePrice", "sourceCurrency", "sourcePartNumber"
+                FROM OPENJSON({SqlList.Rows(items)})
+                WITH (
+                  "id" nvarchar(400) '$.id',
+                  "priceListId" nvarchar(400) '$.priceListId',
+                  "productId" nvarchar(400) '$.productId',
+                  "price" float '$.price',
+                  "sourcePrice" float '$.sourcePrice',
+                  "sourceCurrency" nvarchar(400) '$.sourceCurrency',
+                  "sourcePartNumber" nvarchar(400) '$.sourcePartNumber'
                 )
                 """, ct);
         }

@@ -44,7 +44,7 @@ public sealed class VehicleFinder(AutoPartsContext db)
         var region = f.Region;
 
         return await db.Database.SqlQuery<FinderOption>($"""
-            WITH rows AS (
+            WITH candidates AS (
               SELECT vv."id" AS "variantId",
                      mk."name" AS "makeName",
                      mo."name" AS "modelName",
@@ -72,20 +72,20 @@ public sealed class VehicleFinder(AutoPartsContext db)
               JOIN "VehicleMake" mk ON mk."id" = mo."makeId"
             )
             SELECT 'make' AS "Field", "makeName" AS "Value", COUNT(*) AS "Vehicles"
-            FROM rows
+            FROM candidates
             WHERE "fSeries" AND "fModel" AND "fYear" AND "fBody" AND "fSteering"
               AND "fTransmission" AND "fRegion" AND "fEngine"
             GROUP BY "makeName"
 
             UNION ALL
-            SELECT 'series', "series", COUNT(*) FROM rows
+            SELECT 'series', "series", COUNT(*) FROM candidates
             WHERE "series" IS NOT NULL
               AND "fMake" AND "fModel" AND "fYear" AND "fBody" AND "fSteering"
               AND "fTransmission" AND "fRegion" AND "fEngine"
             GROUP BY "series"
 
             UNION ALL
-            SELECT 'model', "modelName", COUNT(*) FROM rows
+            SELECT 'model', "modelName", COUNT(*) FROM candidates
             WHERE "fMake" AND "fSeries" AND "fYear" AND "fBody" AND "fSteering"
               AND "fTransmission" AND "fRegion" AND "fEngine"
             GROUP BY "modelName"
@@ -95,45 +95,45 @@ public sealed class VehicleFinder(AutoPartsContext db)
             -- those ranges actually reach — expanded here rather than offering
             -- a bare "from" that no customer thinks in.
             SELECT 'year', y."year", COUNT(*)
-            FROM rows
+            FROM candidates
             JOIN LATERAL generate_series(
-              rows."yearFrom",
-              LEAST(COALESCE(rows."yearTo", 9999), EXTRACT(YEAR FROM SYSUTCDATETIME()) + 1)
+              candidates."yearFrom",
+              LEAST(COALESCE(candidates."yearTo", 9999), EXTRACT(YEAR FROM SYSUTCDATETIME()) + 1)
             ) AS y("year") ON 1 = 1
             WHERE "fMake" AND "fSeries" AND "fModel" AND "fBody" AND "fSteering"
               AND "fTransmission" AND "fRegion" AND "fEngine"
             GROUP BY y."year"
 
             UNION ALL
-            SELECT 'bodyType', "bodyType", COUNT(*) FROM rows
+            SELECT 'bodyType', "bodyType", COUNT(*) FROM candidates
             WHERE "bodyType" IS NOT NULL
               AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fSteering"
               AND "fTransmission" AND "fRegion" AND "fEngine"
             GROUP BY "bodyType"
 
             UNION ALL
-            SELECT 'steeringSide', "steeringSide", COUNT(*) FROM rows
+            SELECT 'steeringSide', "steeringSide", COUNT(*) FROM candidates
             WHERE "steeringSide" IS NOT NULL
               AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
               AND "fTransmission" AND "fRegion" AND "fEngine"
             GROUP BY "steeringSide"
 
             UNION ALL
-            SELECT 'transmission', "transmission", COUNT(*) FROM rows
+            SELECT 'transmission', "transmission", COUNT(*) FROM candidates
             WHERE "transmission" IS NOT NULL
               AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
               AND "fSteering" AND "fRegion" AND "fEngine"
             GROUP BY "transmission"
 
             UNION ALL
-            SELECT 'region', "region", COUNT(*) FROM rows
+            SELECT 'region', "region", COUNT(*) FROM candidates
             WHERE "region" IS NOT NULL
               AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
               AND "fSteering" AND "fTransmission" AND "fEngine"
             GROUP BY "region"
 
             UNION ALL
-            SELECT 'engine', "engine", COUNT(*) FROM rows
+            SELECT 'engine', "engine", COUNT(*) FROM candidates
             WHERE "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
               AND "fSteering" AND "fTransmission" AND "fRegion"
             GROUP BY "engine"

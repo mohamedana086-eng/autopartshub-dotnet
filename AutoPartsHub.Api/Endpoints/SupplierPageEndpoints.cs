@@ -41,7 +41,15 @@ public static class SupplierPageEndpoints
                   -- approval should not have a public page that says who they
                   -- are and lists nothing.
                   AND s."active" = 1
-                GROUP BY s."id"
+                -- Every selected column, not just the key. PostgreSQL works out
+                -- that the rest are functionally dependent on the primary key
+                -- and lets `GROUP BY s."id"` stand for all of them; SQL Server
+                -- does not make that inference and wants them named. Same
+                -- grouping either way — one row per supplier — because the key
+                -- is still in the list and determines the rest.
+                GROUP BY s."id", s."code", s."slug", s."name", s."description",
+                         s."reliability", s."rating", s."acceptsReturns",
+                         s."country", s."guaranteeMonths"
                 """).ToListAsync(ct)).FirstOrDefault();
 
             if (supplier is null) return Results.NotFound(new { error = "No such supplier." });

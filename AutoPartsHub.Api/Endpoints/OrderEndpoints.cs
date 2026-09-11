@@ -313,10 +313,14 @@ public static class OrderEndpoints
                 var order = (await db.Database.SqlQuery<PlacedOrder>($"""
                     INSERT INTO "Order" ("id", "reference", "clientId", "currencyCode", "currencyRate",
                                         "weightGrams", "weightComplete")
+                    -- OUTPUT is SQL Server's RETURNING, and on an INSERT it sits
+                    -- between the column list and VALUES. `status` and
+                    -- `createdAt` are read back rather than assumed because
+                    -- both come from database defaults.
+                    OUTPUT INSERTED."id" AS "Id", INSERTED."reference" AS "Reference",
+                           INSERTED."status" AS "Status", INSERTED."createdAt" AS "CreatedAt"
                     VALUES ({orderId}, {Reference()}, {clientId}, {currencyCode}, {rate},
                             {weight.Grams}, {weight.Complete})
-                    RETURNING "id" AS "Id", "reference" AS "Reference",
-                              "status" AS "Status", "createdAt" AS "CreatedAt"
                     """).ToListAsync(ct)).Single();
 
                 // One line per part — the caller deduplicates — so a part maps

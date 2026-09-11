@@ -330,16 +330,27 @@ public static class AdminCatalogueWriteEndpoints
 
             foreach (var row in rows)
             {
+                // MERGE with HOLDLOCK, which is SQL Server's ON CONFLICT — see
+                // the note in SearchMisses for why the lock is not optional.
+                // PostgreSQL's EXCLUDED is `source` here.
                 await db.Database.ExecuteSqlAsync($"""
-                    INSERT INTO "StockLevel" ("id", "productId", "warehouseId", "quantity",
-                                              "reserved", "binLocation", "updatedAt")
-                    VALUES ({Ids.New()}, {id}, {row.WarehouseId}, {row.Quantity},
-                            {row.Reserved}, {row.BinLocation}, CURRENT_TIMESTAMP)
-                    ON CONFLICT ("productId", "warehouseId") DO UPDATE
-                      SET "quantity" = EXCLUDED."quantity",
-                          "reserved" = EXCLUDED."reserved",
-                          "binLocation" = EXCLUDED."binLocation",
-                          "updatedAt" = CURRENT_TIMESTAMP
+                    MERGE "StockLevel" WITH (HOLDLOCK) AS target
+                    USING (VALUES ({id}, {row.WarehouseId}, {row.Quantity},
+                                   {row.Reserved}, {row.BinLocation}))
+                       AS source("productId", "warehouseId", "quantity", "reserved", "binLocation")
+                      ON target."productId" = source."productId"
+                     AND target."warehouseId" = source."warehouseId"
+                    WHEN MATCHED THEN
+                      UPDATE SET "quantity" = source."quantity",
+                                 "reserved" = source."reserved",
+                                 "binLocation" = source."binLocation",
+                                 "updatedAt" = CURRENT_TIMESTAMP
+                    WHEN NOT MATCHED THEN
+                      INSERT ("id", "productId", "warehouseId", "quantity",
+                              "reserved", "binLocation", "updatedAt")
+                      VALUES ({Ids.New()}, source."productId", source."warehouseId",
+                              source."quantity", source."reserved", source."binLocation",
+                              CURRENT_TIMESTAMP);
                     """, ct);
             }
 

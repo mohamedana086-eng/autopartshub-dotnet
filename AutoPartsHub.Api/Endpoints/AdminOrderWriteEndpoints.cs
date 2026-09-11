@@ -104,16 +104,21 @@ public static class AdminOrderWriteEndpoints
                            "carrier" = CASE WHEN {to.Carrier is not null}
                                             THEN {to.Carrier}
                                             ELSE "carrier" END
+                    -- PostgreSQL's RETURNING, which sits at the end. SQL
+                    -- Server's OUTPUT says the same thing and sits here,
+                    -- before the WHERE — INSERTED is the row as it now stands,
+                    -- which is what RETURNING gives on an UPDATE too.
+                    OUTPUT INSERTED."id" AS "Id", INSERTED."status" AS "Status",
+                           INSERTED."statusReason" AS "StatusReason",
+                           INSERTED."statusChangedAt" AS "StatusChangedAt",
+                           INSERTED."trackingNumber" AS "TrackingNumber",
+                           INSERTED."carrier" AS "Carrier"
                      WHERE "id" = {id}
                        AND ({scope} IS NULL OR EXISTS (
                              SELECT 1 FROM "Client" c
                               WHERE c."id" = "Order"."clientId"
                                 AND c."salesManagerId" = {scope}
                            ))
-                    RETURNING "id" AS "Id", "status" AS "Status",
-                              "statusReason" AS "StatusReason",
-                              "statusChangedAt" AS "StatusChangedAt",
-                              "trackingNumber" AS "TrackingNumber", "carrier" AS "Carrier"
                     """).ToListAsync(ct)).FirstOrDefault();
 
                 // Nothing matched: the order changed hands between the scoped

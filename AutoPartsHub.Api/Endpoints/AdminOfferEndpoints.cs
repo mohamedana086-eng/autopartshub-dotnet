@@ -129,27 +129,45 @@ public static class AdminOfferEndpoints
 
         if (offers.Count > 0)
         {
-            var ids = offers.Select(_ => Ids.New()).ToArray();
-            var productIds = offers.Select(_ => productId).ToArray();
-            var supplierIds = offers.Select(o => o.SupplierId).ToArray();
-            var prices = offers.Select(o => o.PurchasePrice).ToArray();
-            var days = offers.Select(o => o.StockDays).ToArray();
-            var numbers = offers.Select(o => o.SupplierPartNumber).ToArray();
-            var active = offers.Select(o => o.Active).ToArray();
-            var now = offers.Select(_ => DateTime.UtcNow).ToArray();
+            // One timestamp for the whole write, not one per row. The eight
+            // parallel arrays this replaced evaluated DateTime.UtcNow once per
+            // offer, so a large save spread its rows across a few milliseconds
+            // for no reason — they are one edit and they are stamped as one.
+            var savedAt = DateTime.UtcNow;
 
+            var rows = offers.Select(o => new
+            {
+                id = Ids.New(),
+                productId,
+                supplierId = o.SupplierId,
+                purchasePrice = o.PurchasePrice,
+                stockDays = o.StockDays,
+                supplierPartNumber = o.SupplierPartNumber,
+                active = o.Active,
+                updatedAt = savedAt,
+            });
+
+            // PostgreSQL zipped eight equal-length arrays back into rows with
+            // unnest. SQL Server has no such thing, and the replacement is
+            // better than a translation would have been: each value now
+            // carries its own name, so the columns cannot be silently
+            // misaligned by somebody inserting one in the wrong place — which
+            // the positional form could not detect at all.
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "SupplierOffer" ("id", "productId", "supplierId", "purchasePrice",
                                              "stockDays", "supplierPartNumber", "active", "updatedAt")
-                SELECT * FROM unnest(
-                  {ids}::text[],
-                  {productIds}::text[],
-                  {supplierIds}::text[],
-                  {prices}::double precision[],
-                  {days}::int[],
-                  {numbers}::text[],
-                  {active}::boolean[],
-                  {now}::timestamp[]
+                SELECT "id", "productId", "supplierId", "purchasePrice",
+                       "stockDays", "supplierPartNumber", "active", "updatedAt"
+                FROM OPENJSON({SqlList.Rows(rows)})
+                WITH (
+                  "id" nvarchar(400) '$.id',
+                  "productId" nvarchar(400) '$.productId',
+                  "supplierId" nvarchar(400) '$.supplierId',
+                  "purchasePrice" float '$.purchasePrice',
+                  "stockDays" int '$.stockDays',
+                  "supplierPartNumber" nvarchar(400) '$.supplierPartNumber',
+                  "active" bit '$.active',
+                  "updatedAt" datetime2(3) '$.updatedAt'
                 )
                 """, ct);
         }

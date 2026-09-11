@@ -416,16 +416,28 @@ public static class MarkupRules
 
         if (conditions.Count == 0) return;
 
-        var ids = conditions.Select(_ => Ids.New()).ToArray();
-        var ruleIds = conditions.Select(_ => ruleId).ToArray();
-        var dimensions = conditions.Select(c => c.Dimension).ToArray();
-        var values = conditions.Select(c => c.Value).ToArray();
-        var negated = conditions.Select(c => c.Negated).ToArray();
+        var rows = conditions.Select(c => new
+        {
+            id = Ids.New(),
+            ruleId,
+            dimension = c.Dimension,
+            value = c.Value,
+            negated = c.Negated,
+        });
 
+        // Objects rather than the five parallel arrays PostgreSQL zipped with
+        // unnest — see SqlList.Rows.
         await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "MarkupRuleCondition" ("id", "ruleId", "dimension", "value", "negated")
-            SELECT * FROM unnest({ids}::text[], {ruleIds}::text[],
-                                 {dimensions}::text[], {values}::text[], {negated}::boolean[])
+            SELECT "id", "ruleId", "dimension", "value", "negated"
+            FROM OPENJSON({SqlList.Rows(rows)})
+            WITH (
+              "id" nvarchar(400) '$.id',
+              "ruleId" nvarchar(400) '$.ruleId',
+              "dimension" nvarchar(400) '$.dimension',
+              "value" nvarchar(400) '$.value',
+              "negated" bit '$.negated'
+            )
             """, ct);
     }
 
@@ -451,8 +463,10 @@ public static class MarkupRules
 
         var gone = await db.Database.SqlQuery<string>($"""
             DELETE FROM "MarkupRuleCondition"
+            -- DELETED, not INSERTED: on a delete the row being reported is the
+            -- one that went. OUTPUT sits before the WHERE either way.
+            OUTPUT DELETED."ruleId" AS "Value"
              WHERE "dimension" = {dimension} AND "value" = {value}
-            RETURNING "ruleId" AS "Value"
             """).ToListAsync(ct);
 
         var ids = gone.Distinct(StringComparer.Ordinal).ToArray();

@@ -278,11 +278,32 @@ public static class CartEndpoints
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
+        // An upsert that gives back the row's id either way.
+        //
+        // PostgreSQL says this as INSERT … ON CONFLICT … RETURNING. SQL Server
+        // says it as MERGE … OUTPUT, and the two differ in one way that
+        // matters: ON CONFLICT is atomic against the unique index by
+        // construction, and MERGE is not. Two callers can both find no match
+        // and both try to insert, and the loser gets a unique-key violation
+        // instead of an update.
+        //
+        // WITH (HOLDLOCK) is what closes that — it takes a range lock on the
+        // key being searched for, so the second caller waits rather than
+        // deciding. It is not optional here: one customer with the shop open
+        // in two tabs is enough to race it.
+        //
+        // OUTPUT reports on both branches, so the id comes back whether the
+        // cart was created or found.
         var cartId = (await db.Database.SqlQuery<string>($"""
-            INSERT INTO "Cart" ("id", "clientId", "updatedAt")
-            VALUES ({Ids.New()}, {clientId}, SYSUTCDATETIME())
-            ON CONFLICT ("clientId") DO UPDATE SET "updatedAt" = SYSUTCDATETIME()
-            RETURNING "id" AS "Value"
+            MERGE "Cart" WITH (HOLDLOCK) AS target
+            USING (VALUES ({clientId})) AS source("clientId")
+              ON target."clientId" = source."clientId"
+            WHEN MATCHED THEN
+              UPDATE SET "updatedAt" = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN
+              INSERT ("id", "clientId", "updatedAt")
+              VALUES ({Ids.New()}, {clientId}, SYSUTCDATETIME())
+            OUTPUT INSERTED."id" AS "Value";
             """).ToListAsync(ct)).Single();
 
         var ids = wanted.Keys.ToArray();
@@ -294,9 +315,15 @@ public static class CartEndpoints
         foreach (var (productId, quantity) in wanted)
         {
             await db.Database.ExecuteSqlAsync($"""
-                INSERT INTO "CartItem" ("id", "cartId", "productId", "quantity")
-                VALUES ({Ids.New()}, {cartId}, {productId}, {quantity})
-                ON CONFLICT ("cartId", "productId") DO UPDATE SET "quantity" = {quantity}
+                MERGE "CartItem" WITH (HOLDLOCK) AS target
+                USING (VALUES ({cartId}, {productId})) AS source("cartId", "productId")
+                  ON target."cartId" = source."cartId"
+                 AND target."productId" = source."productId"
+                WHEN MATCHED THEN
+                  UPDATE SET "quantity" = {quantity}
+                WHEN NOT MATCHED THEN
+                  INSERT ("id", "cartId", "productId", "quantity")
+                  VALUES ({Ids.New()}, {cartId}, {productId}, {quantity});
                 """, ct);
         }
 
