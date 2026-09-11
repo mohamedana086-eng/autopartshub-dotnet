@@ -31,7 +31,7 @@ public sealed class BarcodeQueries(AutoPartsContext db)
         var rows = await db.Database.SqlQuery<BarcodeRow>($"""
             SELECT "productId" AS "ProductId", "code" AS "Code", "kind" AS "Kind"
             FROM "ProductBarcode"
-            WHERE "productId" = ANY({array}::text[])
+            WHERE "productId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
             -- The code breaks a tie on sortOrder, so two codes given the same
             -- position do not swap places between requests. The code is
             -- unique, so this is a total order rather than merely a tidier one.

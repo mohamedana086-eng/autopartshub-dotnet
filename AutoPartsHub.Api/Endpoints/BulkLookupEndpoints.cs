@@ -61,7 +61,7 @@ public static class BulkLookupEndpoints
                 SELECT "id" AS "Id",
                        regexp_replace(upper("partNumber"), '[^A-Z0-9]', '', 'g') AS "Norm"
                 FROM "Product"
-                WHERE regexp_replace(upper("partNumber"), '[^A-Z0-9]', '', 'g') = ANY({needles}::text[])
+                WHERE regexp_replace(upper("partNumber"), '[^A-Z0-9]', '', 'g') IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(needles)}))
                 """).ToListAsync(ct);
 
             var viaInterchange = await db.Database.SqlQuery<InterchangeMatch>($"""
@@ -69,7 +69,7 @@ public static class BulkLookupEndpoints
                        regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') AS "Norm",
                        i."targetPartNo" AS "Target"
                 FROM "Interchange" i
-                WHERE regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') = ANY({needles}::text[])
+                WHERE regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(needles)}))
                 """).ToListAsync(ct);
 
             var ctx = await pricing.LoadAsync(http, ct);
@@ -102,7 +102,7 @@ public static class BulkLookupEndpoints
                   JOIN "Warehouse" w ON w."id" = sl."warehouseId"
                   WHERE sl."productId" = p."id" AND w."active" = 1
                 ) st
-                WHERE p."id" = ANY({ids}::text[])
+                WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 -- Same rule as search and the detail page: a switched-off
                 -- supplier's parts are not in the catalogue, so a pasted list
                 -- reports them as not carried rather than quoting a price

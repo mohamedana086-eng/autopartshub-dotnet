@@ -158,7 +158,7 @@ public static class OrderEndpoints
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
                  AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
-                WHERE p."id" = ANY({ids}::text[])
+                WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 -- A switched-off supplier's part is not orderable. Dropping it
                 -- here rather than refusing separately is deliberate: the
                 -- caller already compares this count against what was asked

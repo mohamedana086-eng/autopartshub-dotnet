@@ -196,6 +196,60 @@ const blockRewrites = {
       ),
 
   /**
+   * `= ANY(array)` becomes a subquery over OPENJSON.
+   *
+   * SQL Server has no array parameter, so the list travels as JSON in one
+   * nvarchar and is read back as rows. See SqlList for why JSON rather than a
+   * delimiter, a splice, or a parameter per value.
+   *
+   * The negated form is rewritten as NOT EXISTS rather than NOT IN. They are
+   * not the same: `x NOT IN (…)` is unknown — and therefore not true — as soon
+   * as the list contains a null, so a single null would silently empty the
+   * result. NOT EXISTS has no such edge, and both sites here are deletions
+   * where "silently matched nothing" would mean deleting nothing.
+   *
+   * Only the single-array forms. The parallel-array `unnest(a, b, c)` bulk
+   * inserts are a different problem — JSON objects rather than JSON arrays —
+   * and are left for a pass that can restructure the C# beside them.
+   *
+   * COLLATE DATABASE_DEFAULT is not decoration. When OPENJSON reads a
+   * parameter its `value` column comes back as Latin1_General_BIN2, and
+   * comparing that to a column in the database's own collation is an outright
+   * error — fourteen statements said so. The quiet half is worse than the
+   * loud one: Latin1_General_BIN2 is case-SENSITIVE, so the obvious fix of
+   * collating the column instead would have left every one of these lookups
+   * matching case-sensitively while every other string comparison in the
+   * application does not.
+   */
+  arrays: (sql) =>
+    sql
+      .replace(
+        /NOT\s*\(\s*([^()]+?)\s*=\s*ANY\(\{([^}]+)\}::text\[\]\)\s*\)/g,
+        (_, column, list) =>
+          `NOT EXISTS (SELECT 1 FROM OPENJSON({SqlList.Of(${list})}) ` +
+          `WHERE value COLLATE DATABASE_DEFAULT = ${column})`
+      )
+      .replace(
+        /=\s*ANY\(\{([^}]+)\}::text\[\]\)/g,
+        (_, list) =>
+          `IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(${list})}))`
+      )
+      // The switch-the-filter-off guard in front of one of them.
+      .replace(/\{([^}]+)\}::text\[\]\s+IS\s+NULL/g, (_, list) => `{SqlList.Of(${list})} IS NULL`),
+
+  /**
+   * Adds the collation to OPENJSON reads written before it was known to be
+   * needed. See the note on `arrays` for why it is not optional.
+   */
+  collation: (sql) =>
+    sql
+      .replace(
+        /SELECT value FROM OPENJSON\(/g,
+        'SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON('
+      )
+      .replace(/WHERE value = /g, 'WHERE value COLLATE DATABASE_DEFAULT = '),
+
+  /**
    * LIMIT becomes OFFSET/FETCH, or TOP.
    *
    * `OFFSET … FETCH` is the standard form and the one that pages, but SQL

@@ -325,7 +325,7 @@ public static class AdminCatalogueWriteEndpoints
 
             await db.Database.ExecuteSqlAsync($"""
                 DELETE FROM "StockLevel"
-                WHERE "productId" = {id} AND NOT ("warehouseId" = ANY({warehouseIds}::text[]))
+                WHERE "productId" = {id} AND NOT EXISTS (SELECT 1 FROM OPENJSON({SqlList.Of(warehouseIds)}) WHERE value COLLATE DATABASE_DEFAULT = "warehouseId")
                 """, ct);
 
             foreach (var row in rows)

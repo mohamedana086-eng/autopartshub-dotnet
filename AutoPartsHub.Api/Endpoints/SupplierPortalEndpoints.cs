@@ -84,12 +84,12 @@ public static class SupplierPortalEndpoints
                   (SELECT COUNT(*) FROM "OrderItem" i
                      JOIN "Product" p ON p."id" = i."productId"
                      JOIN "Order" o ON o."id" = i."orderId"
-                    WHERE p."supplierId" = {supplierId} AND o."status" = ANY({Open}::text[])
+                    WHERE p."supplierId" = {supplierId} AND o."status" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(Open)}))
                   ) AS "OpenLines",
                   (SELECT COALESCE(SUM(i."quantity"), 0) FROM "OrderItem" i
                      JOIN "Product" p ON p."id" = i."productId"
                      JOIN "Order" o ON o."id" = i."orderId"
-                    WHERE p."supplierId" = {supplierId} AND o."status" = ANY({Open}::text[])
+                    WHERE p."supplierId" = {supplierId} AND o."status" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(Open)}))
                   ) AS "OpenUnits"
                 """).ToListAsync(ct)).Single();
 

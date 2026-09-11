@@ -470,7 +470,7 @@ public static class MarkupRules
                    r."purchasePriceTo" AS "PurchasePriceTo", c."dimension" AS "Dimension"
             FROM "MarkupRule" r
             LEFT JOIN "MarkupRuleCondition" c ON c."ruleId" = r."id"
-            WHERE r."id" = ANY({ids}::text[])
+            WHERE r."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
             """).ToListAsync(ct);
 
         foreach (var group in remaining.GroupBy(r => r.Id, StringComparer.Ordinal))

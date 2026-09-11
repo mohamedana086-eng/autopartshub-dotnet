@@ -103,7 +103,7 @@ public static class CartEndpoints
                        p."quantityPerPackage" AS "QuantityPerPackage"
                 FROM "Product" p
                 LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
-                WHERE p."id" = ANY({ids}::text[])
+                WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 -- "Still in the catalogue" includes whether anyone is selling
                 -- it. A part behind a switched-off supplier is refused on the
                 -- way into a basket, which is the earliest place to say no.
@@ -288,7 +288,7 @@ public static class CartEndpoints
         var ids = wanted.Keys.ToArray();
         await db.Database.ExecuteSqlAsync($"""
             DELETE FROM "CartItem"
-            WHERE "cartId" = {cartId} AND NOT ("productId" = ANY({ids}::text[]))
+            WHERE "cartId" = {cartId} AND NOT EXISTS (SELECT 1 FROM OPENJSON({SqlList.Of(ids)}) WHERE value COLLATE DATABASE_DEFAULT = "productId")
             """, ct);
 
         foreach (var (productId, quantity) in wanted)

@@ -122,7 +122,7 @@ public sealed class SearchQueries(AutoPartsContext db)
             WHERE (
               -- No query: everything is reachable, and the filters below do the work.
               ({hasQuery} IS NULL OR {hasQuery} = 0)
-              OR p."id" = ANY({ids}::text[])
+              OR p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
               -- Every token has to land somewhere, but not all in the same
               -- column — which is what lets "bosch brake pad" work, with the
               -- brand on one and the rest on another. Written as "no token
@@ -184,7 +184,7 @@ public sealed class SearchQueries(AutoPartsContext db)
             -- with IS TRUE; SQL Server has no such test, so the null is
             -- handled where it arises.
             AND (({returnsOnly} IS NULL OR {returnsOnly} = 0) OR (s."acceptsReturns" = 1))
-            AND ({partType}::text[] IS NULL OR p."partType" = ANY({partType}::text[]))
+            AND ({SqlList.Of(partType)} IS NULL OR p."partType" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(partType)})))
             """).ToListAsync(ct);
 
         return new SearchPage(
@@ -238,7 +238,7 @@ public sealed class SearchQueries(AutoPartsContext db)
               LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
               WHERE (
                 ({hasQuery} IS NULL OR {hasQuery} = 0)
-                OR p."id" = ANY({ids}::text[])
+                OR p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 OR NOT EXISTS (
                   SELECT 1 FROM unnest({tokens}::text[]) AS tok
                   WHERE NOT (
@@ -356,7 +356,7 @@ public sealed class SearchQueries(AutoPartsContext db)
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
               WHERE sl."productId" = p."id" AND w."active" = 1
             ) st
-            WHERE p."id" = ANY({array}::text[])
+            WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
             AND ({variant} IS NULL OR EXISTS (
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
@@ -394,7 +394,7 @@ public sealed class SearchQueries(AutoPartsContext db)
             SELECT "sourceId" AS "SourceId", "targetPartNo" AS "TargetPartNo",
                    "targetManufacturer" AS "TargetManufacturer", "isOEM" AS "IsOem"
             FROM "Interchange"
-            WHERE "sourceId" = ANY({array}::text[])
+            WHERE "sourceId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
             """).ToListAsync(ct);
     }
 

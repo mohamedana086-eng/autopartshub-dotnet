@@ -277,7 +277,7 @@ public static class AdminDeskEndpoints
                 JOIN "Product" p ON p."id" = oi."productId"
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 JOIN "VehicleSystem" vs ON vs."id" = p."vehicleSystemId"
-                WHERE oi."orderId" = ANY({ids}::text[])
+                WHERE oi."orderId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 ORDER BY oi."id" ASC
                 """).ToListAsync(ct);
 
@@ -408,7 +408,7 @@ public static class AdminDeskEndpoints
                        ci."quantity" AS "Quantity"
                 FROM "CartItem" ci
                 JOIN "Product" p ON p."id" = ci."productId"
-                WHERE ci."cartId" = ANY({cartIds}::text[])
+                WHERE ci."cartId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(cartIds)}))
                 ORDER BY ci."addedAt" ASC
                 """).ToListAsync(ct);
 
