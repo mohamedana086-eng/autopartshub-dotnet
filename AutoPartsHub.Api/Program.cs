@@ -68,6 +68,7 @@ builder.Services.AddSingleton(new SessionTokens(
     AuthSecret.Resolve(Environment.GetEnvironmentVariable("AUTH_SECRET"), builder.Environment.IsProduction())));
 
 builder.Services.AddScoped<PricingContextLoader>();
+builder.Services.AddSingleton<FullTextSearch>();
 builder.Services.AddScoped<SearchQueries>();
 builder.Services.AddScoped<SpecQueries>();
 builder.Services.AddScoped<AutoPartsHub.Api.Vehicles.VehicleFinder>();
@@ -111,10 +112,17 @@ builder.Services.AddSingleton<IFileStore>(_ => new LocalDiskFileStore(
 builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<AutoPartsHub.Api.Mail.Mailer>());
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
-// Two providers, for as long as the move to SQL Server takes. The engine is
-// decided once, here, from DATABASE_PROVIDER or from the shape of the
-// connection string — see ConnectionString.ProviderFor. Everything already
-// deployed reads as PostgreSQL and is untouched.
+// The engine is decided once, here, from DATABASE_PROVIDER or from the shape
+// of the connection string — see ConnectionString.ProviderFor.
+//
+// Two providers are registered and only one of them works. The raw SQL this
+// application runs was ported to SQL Server in place rather than kept in two
+// dialects, so the Npgsql branch selects a provider that will fail on the
+// first statement it is given. It is kept because the decision is worth making
+// explicitly and loudly: ProviderFor refuses a DATABASE_PROVIDER that
+// disagrees with its connection string, and that refusal is the point. A
+// deployment half-moved to SQL Server should stop at startup with a sentence
+// saying so, not read somebody else's data.
 var connection = ConnectionString.Resolve(builder.Configuration);
 var provider = ConnectionString.ProviderFor(
     Environment.GetEnvironmentVariable("DATABASE_PROVIDER"), connection);

@@ -30,7 +30,7 @@ namespace AutoPartsHub.Api.Catalogue;
 /// fuzzy fallback returns different columns from the exact match, which the
 /// comparison harness sees.
 /// </remarks>
-public sealed class SearchQueries(AutoPartsContext db)
+public sealed class SearchQueries(AutoPartsContext db, FullTextSearch fullText)
 {
     /// <summary>How many rows the query will consider before the endpoint narrows them.</summary>
     public const int MaxResults = 200;
@@ -403,71 +403,202 @@ public sealed class SearchQueries(AutoPartsContext db)
     /// matches the query once separators are ignored.
     /// </summary>
     /// <remarks>
-    /// Done in SQL because the normalised form is not stored. That means a
-    /// scan: fine for a catalogue this size, but if it grows this wants a
-    /// normalised column with an index on it rather than regexp_replace per
-    /// row.
+    /// The normalised form is a stored column now — see
+    /// <c>AutoPartsContext.SearchIndexSql</c> — so this compares a column
+    /// rather than recomputing one per row. It is still a scan, because the
+    /// contract here is "contains" and no index answers a leading wildcard;
+    /// what changed is that the scan reads a value instead of running a
+    /// regular expression to derive one. The near-miss search below, which is
+    /// allowed to be a prefix, seeks.
     /// </remarks>
     public async Task<List<string>> IdsMatchingNormalisedPartNumberAsync(
         string q, CancellationToken ct = default)
     {
         var needle = PartNumbers.Normalise(q);
-        if (needle.Length < 3) return [];
+        if (needle.Length < ShortestNeedle) return [];
         var pattern = $"%{needle}%";
 
         return await db.Database.SqlQuery<string>($"""
             SELECT DISTINCT p."id" AS "Value"
             FROM "Product" p
             LEFT JOIN "Interchange" i ON i."sourceId" = p."id"
-            WHERE regexp_replace(upper(p."partNumber"), '[^A-Z0-9]', '', 'g') LIKE {pattern}
-               OR regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') LIKE {pattern}
+            WHERE p."partNumberNormalised" LIKE {pattern}
+               OR i."targetPartNoNormalised" LIKE {pattern}
             """).ToListAsync(ct);
     }
 
-    /// <summary>Below this a trigram match is more noise than help — tuned
-    /// against the catalogue, where a genuine typo scores about 0.6 and up.</summary>
-    private const double FuzzyThreshold = 0.45;
+    /// <summary>
+    /// Below this a near miss is more noise than help: two characters of a
+    /// part number reach most of the catalogue.
+    /// </summary>
+    private const int ShortestNeedle = 3;
 
     /// <summary>
-    /// Closest products to a query that matched nothing exactly, ordered by how
-    /// close they are.
+    /// How many near misses are worth offering.
     /// </summary>
     /// <remarks>
-    /// <c>word_similarity</c> compares the query against the best-matching run
-    /// of words in the target rather than the whole string, so "brak pad"
-    /// still scores against "Brake pad set, front" without the rest of the
-    /// name dragging it down. Needs pg_trgm — see the trigram migration.
+    /// Small on purpose, and not only for the page: it is the limit each lane
+    /// is capped at, so "how much work can an empty search cause" has an
+    /// answer that does not depend on the size of the catalogue. Twenty-five
+    /// is what the similarity scoring returned, kept so the page that presents
+    /// them is unchanged.
+    /// </remarks>
+    private const int NearMisses = 25;
+
+    /// <summary>
+    /// Closest products to a query that matched nothing exactly, ordered by
+    /// how close they are.
+    /// </summary>
+    /// <remarks>
+    /// This used to be pg_trgm: <c>word_similarity</c> against every product
+    /// name, every manufacturer name and every part number, scored, filtered
+    /// at 0.45 and sorted. It read the whole table on every search that came
+    /// up empty — which is precisely the search a customer repeats, having
+    /// typed it wrong once. SQL Server has no equivalent function, and T-067
+    /// does not ask for one: two seeks, no leading wildcard, a small limit.
+    ///
+    /// TWO LANES
+    /// ---------
+    /// A part number and a name are wrong in different ways and are reached by
+    /// different indexes, so they are asked separately rather than scored
+    /// together. Numbers first: three normalised characters of a part number
+    /// agreeing is a deliberate act, while three characters of a name agreeing
+    /// is a coincidence the catalogue is full of.
+    ///
+    /// WHAT WAS LOST
+    /// -------------
+    /// Trigram similarity matched a typo in the MIDDLE of a word — "brkae pad"
+    /// scored against "Brake pad set, front". Neither lane here does: a prefix
+    /// seek and a full-text prefix term both need the start to be right. That
+    /// is the trade the task makes, and it is the same property as the scan
+    /// going away, seen from the other side. The shapes that still work are
+    /// truncation ("brake pa", "0 986 42") and one wrong word among right
+    /// ones, which is most of what a search box receives.
     /// </remarks>
     public async Task<List<string>> IdsByFuzzyMatchAsync(string q, CancellationToken ct = default)
     {
-        var needle = q.Trim().ToLowerInvariant();
-        if (needle.Length < 3) return [];
+        var found = new List<string>();
+
+        found.AddRange(await IdsByPartNumberPrefixAsync(q, ct));
+        found.AddRange(await IdsByNameAsync(q, ct));
+
+        return found.Distinct().Take(NearMisses).ToList();
+    }
+
+    /// <summary>Products whose part number, or a cross-reference to one,
+    /// starts with what was typed.</summary>
+    /// <remarks>
+    /// Both sides seek their normalised column. The grouping is not
+    /// decoration: a product can be reached by its own number and by a
+    /// cross-reference to it in the same query, and the caller reads this list
+    /// as a ranking, so the same id arriving twice would spend two of the
+    /// twenty-five places on one product.
+    /// </remarks>
+    private async Task<List<string>> IdsByPartNumberPrefixAsync(string q, CancellationToken ct)
+    {
+        var needle = PartNumbers.Normalise(q);
+        if (needle.Length < ShortestNeedle) return [];
+        var prefix = $"{needle}%";
 
         return await db.Database.SqlQuery<string>($"""
-            SELECT p."id" AS "Value",
-                   GREATEST(
-                     word_similarity({needle}, lower(p."name")),
-                     word_similarity({needle}, lower(m."name")),
-                     similarity(lower(p."partNumber"), {needle})
-                   ) AS score
-            FROM "Product" p
-            JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
-            WHERE GREATEST(
-                    word_similarity({needle}, lower(p."name")),
-                    word_similarity({needle}, lower(m."name")),
-                    similarity(lower(p."partNumber"), {needle})
-                  ) >= {FuzzyThreshold}
-            -- Part number breaks the remaining tie. Two parts can score the
-            -- same AND be called the same thing — this catalogue has two
-            -- "Brake pad set, front" that tie at 0.5 on "brak pd" — and
-            -- without this they come back in whatever order the heap holds
-            -- them, which changes when unrelated rows are rewritten. The
-            -- ranked search already breaks ties this way; the fuzzy fallback
-            -- was missed.
-            ORDER BY score DESC, p."name" ASC, p."partNumber" ASC
-            OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY
+            SELECT TOP ({NearMisses}) "Value"
+            FROM (
+                SELECT p."id" AS "Value", p."partNumberNormalised" AS "Sort",
+                       p."partNumber" AS "Tie"
+                FROM "Product" p
+                WHERE p."partNumberNormalised" LIKE {prefix}
+                UNION ALL
+                SELECT i."sourceId", i."targetPartNoNormalised", i."targetPartNo"
+                FROM "Interchange" i
+                WHERE i."targetPartNoNormalised" LIKE {prefix}
+            ) hit
+            GROUP BY "Value"
+            -- Shortest completion first, so the number that is nearly the one
+            -- typed outranks the one that merely begins the same way. Part
+            -- number breaks the tie for the same reason it does in the ranked
+            -- search: two products can carry the same normalised number.
+            ORDER BY MIN("Sort") ASC, MIN("Tie") ASC
             """).ToListAsync(ct);
     }
+
+    /// <summary>Products whose name, or whose manufacturer's name, is close to
+    /// what was typed.</summary>
+    /// <remarks>
+    /// Which lane runs depends on the deployment rather than on the query —
+    /// see <see cref="FullTextSearch"/>. Both seek; full text reaches a word
+    /// anywhere in a name, and its absence reaches only the start of one.
+    /// </remarks>
+    private async Task<List<string>> IdsByNameAsync(string q, CancellationToken ct)
+    {
+        var needle = q.Trim();
+        if (needle.Length < ShortestNeedle) return [];
+
+        var prefix = $"{needle}%";
+        var terms = FullTextSearch.TermsFor(needle);
+
+        return terms is not null && await fullText.IsIndexedAsync(ct)
+            ? await IdsByIndexedNameAsync(terms, prefix, ct)
+            : await IdsByNamePrefixAsync(prefix, ct);
+    }
+
+    /// <summary>The name lane on an engine with no full-text index.</summary>
+    /// <remarks>
+    /// The manufacturer half is a seek whether or not full text exists —
+    /// Manufacturer is small and its name is uniquely indexed — so it is the
+    /// same statement in both lanes.
+    /// </remarks>
+    private Task<List<string>> IdsByNamePrefixAsync(string prefix, CancellationToken ct) =>
+        db.Database.SqlQuery<string>($"""
+            SELECT TOP ({NearMisses}) "Value"
+            FROM (
+                SELECT p."id" AS "Value", p."name" AS "Name", p."partNumber" AS "PartNumber"
+                FROM "Product" p
+                WHERE p."name" LIKE {prefix}
+                UNION ALL
+                SELECT p."id", p."name", p."partNumber"
+                FROM "Product" p
+                JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
+                WHERE m."name" LIKE {prefix}
+            ) hit
+            GROUP BY "Value"
+            ORDER BY MIN("Name") ASC, MIN("PartNumber") ASC
+            """).ToListAsync(ct);
+
+    /// <summary>The name lane where the engine has a full-text index.</summary>
+    /// <remarks>
+    /// <c>CONTAINSTABLE</c> rather than a <c>CONTAINS</c> predicate, because
+    /// it returns a RANK and the caller reads this list as an ordering. It
+    /// carries the same limit of twenty-five, so the index is asked for a page
+    /// rather than for everything that matched.
+    ///
+    /// READ, NOT RUN. LocalDB — which every test in this repository runs
+    /// against — cannot host Full-Text Search:
+    /// <c>SERVERPROPERTY('IsFullTextInstalled')</c> answers 0 and no edition
+    /// of it answers otherwise. So this statement is the one part of the
+    /// search that has not been executed against an engine. The lane beside it
+    /// has, <see cref="FullTextSearch.IsIndexedAsync"/> is what decides which
+    /// one a deployment gets, and the migration that would create the index
+    /// declines to on an instance without the component. When the hosting
+    /// decision lands (BLK-003) on an instance that has it, this is the
+    /// statement to exercise first.
+    /// </remarks>
+    private Task<List<string>> IdsByIndexedNameAsync(string terms, string prefix, CancellationToken ct) =>
+        db.Database.SqlQuery<string>($"""
+            SELECT TOP ({NearMisses}) "Value"
+            FROM (
+                SELECT p."id" AS "Value", ft."RANK" AS "Rank", p."name" AS "Name",
+                       p."partNumber" AS "PartNumber"
+                FROM CONTAINSTABLE("Product", ("name"), {terms}, {NearMisses}) ft
+                JOIN "Product" p ON p."id" = ft."KEY"
+                UNION ALL
+                SELECT p."id", 0, p."name", p."partNumber"
+                FROM "Product" p
+                JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
+                WHERE m."name" LIKE {prefix}
+            ) hit
+            GROUP BY "Value"
+            ORDER BY MAX("Rank") DESC, MIN("Name") ASC, MIN("PartNumber") ASC
+            """).ToListAsync(ct);
 
     public Task<string?> SystemNameBySlugAsync(string slug, CancellationToken ct = default) =>
         db.VehicleSystems.Where(v => v.Slug == slug).Select(v => v.Name).FirstOrDefaultAsync(ct);

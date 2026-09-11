@@ -79,6 +79,7 @@ function parameterise(sql) {
   // always an integer anyway. Reported as six failures until this existed,
   // none of which said anything about the statement.
   text = text
+    .replace(/\bTOP\s*\(\s*NULL\s*\)/g, 'TOP (1)')
     .replace(/\bTOP\s+NULL\b/g, 'TOP 1')
     .replace(/\bOFFSET\s+NULL\b/g, 'OFFSET 0')
     .replace(/\bFETCH\s+NEXT\s+NULL\b/g, 'FETCH NEXT 1');
@@ -92,6 +93,18 @@ function parameterise(sql) {
   const flags = [...text.matchAll(/CASE WHEN NULL =/g)].length;
   if (flags > 0) {
     text = `DECLARE @flag bit;\n${text.replace(/CASE WHEN NULL =/g, 'CASE WHEN @flag =')}`;
+  }
+
+  // And in CONTAINSTABLE, whose arguments are not values: the third is a
+  // search condition in full text's own little language and the fourth is a
+  // row count, and NULL is a syntax error in both positions rather than an
+  // untyped anything. Left as NULL the statement never reaches the question
+  // worth asking of it — whether this instance has a full-text index — and
+  // answers with two parse errors instead.
+  if (/\bCONTAINSTABLE\b/.test(text)) {
+    text = `DECLARE @terms nvarchar(4000);\n${text.replace(
+      /(CONTAINSTABLE\s*\([^,]+,\s*\([^)]*\)\s*,\s*)NULL(\s*,\s*)NULL/g,
+      '$1@terms$21')}`;
   }
 
   return { text, names: [] };

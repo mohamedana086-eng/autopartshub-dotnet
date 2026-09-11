@@ -146,8 +146,8 @@ runs:
 | `SELECT … FOR UPDATE` | stock reservation takes real row locks at checkout |
 | `LATERAL` joins | the admin lists aggregate per row in one pass |
 | `unnest(…)` | a price-list upload is one statement per five thousand rows |
-| `regexp_replace` in a predicate | part numbers match with their separators stripped |
-| `word_similarity` | the fuzzy search, which needs pg_trgm |
+| a stored normalised part number | part numbers match with their separators stripped, and seek |
+| `CONTAINSTABLE` and prefix seeks | the near-miss search, where pg_trgm's `word_similarity` was |
 | `COUNT(*) OVER ()` | the search's exact total, on the same pass as its rows |
 | `row_number() OVER (PARTITION BY …)` | the first three specifications *of each part*, not the first three overall |
 | `ON CONFLICT … DO NOTHING` | a barcode another part already holds is skipped, not a failed import |

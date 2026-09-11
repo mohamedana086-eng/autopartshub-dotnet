@@ -52,7 +52,11 @@ public sealed class VehicleFinder(AutoPartsContext db)
             -- passed a century. sys.all_objects has thousands of rows in every
             -- database and is only being counted, not read.
             WITH years AS (
-              SELECT TOP (200) 1899 + ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS "year"
+              -- CAST because ROW_NUMBER is bigint and a year is not. Left as
+              -- bigint it decides the type of the whole union below, where
+              -- every other branch contributes a name.
+              SELECT TOP (200)
+                     CAST(1899 + ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS int) AS "year"
               FROM sys.all_objects
             ),
             candidates AS (
@@ -71,8 +75,9 @@ public sealed class VehicleFinder(AutoPartsContext db)
                      CASE WHEN {make} IS NULL OR mk."name" = {make} THEN 1 ELSE 0 END AS "fMake",
                      CASE WHEN {series} IS NULL OR mo."series" = {series} OR mo."series" IS NULL THEN 1 ELSE 0 END AS "fSeries",
                      CASE WHEN {model} IS NULL OR mo."name" = {model} THEN 1 ELSE 0 END AS "fModel",
-                     ({year} IS NULL
-                       OR (vv."yearFrom" <= {year} AND COALESCE(vv."yearTo", 9999) >= {year})) AS "fYear",
+                     CASE WHEN {year} IS NULL
+                            OR (vv."yearFrom" <= {year} AND COALESCE(vv."yearTo", 9999) >= {year})
+                          THEN 1 ELSE 0 END AS "fYear",
                      CASE WHEN {bodyType} IS NULL OR vv."bodyType" = {bodyType} OR vv."bodyType" IS NULL THEN 1 ELSE 0 END AS "fBody",
                      CASE WHEN {steeringSide} IS NULL OR vv."steeringSide" = {steeringSide} OR vv."steeringSide" IS NULL THEN 1 ELSE 0 END AS "fSteering",
                      CASE WHEN {transmission} IS NULL OR vv."transmission" = {transmission} OR vv."transmission" IS NULL THEN 1 ELSE 0 END AS "fTransmission",
@@ -105,7 +110,14 @@ public sealed class VehicleFinder(AutoPartsContext db)
             -- A variant covers a range of years, so the options are the years
             -- those ranges actually reach — expanded here rather than offering
             -- a bare "from" that no customer thinks in.
-            SELECT 'year', y."year", COUNT(*)
+            -- The year is the one option that is not already text, and the
+            -- branches of a UNION do not each keep their own type: SQL Server
+            -- picks the one with the highest precedence and converts the rest
+            -- to it, so an uncast year here turns every make, model and engine
+            -- name in the result into a failed conversion to bigint. The
+            -- PostgreSQL this came from carried the cast; it was dropped as
+            -- one of the redundant ones, and it is not.
+            SELECT 'year', CAST(y."year" AS nvarchar(400)), COUNT(*)
             FROM candidates
             -- PostgreSQL expands the range with LATERAL generate_series. SQL
             -- Server's GENERATE_SERIES was the obvious replacement and is not

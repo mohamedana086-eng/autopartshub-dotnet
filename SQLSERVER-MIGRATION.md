@@ -22,17 +22,34 @@ migrations that added it. **Every table and column the raw SQL names now
 resolves.**
 
 **The provider.** `DATABASE_PROVIDER` chooses; the shape of the connection
-string answers when it is unset. Everything currently deployed reads as
-PostgreSQL and is untouched.
+string answers when it is unset, and a setting that disagrees with its string
+is refused rather than left to the driver.
+
+**But there is only one engine now, and this should be said plainly.** The
+raw SQL was ported in place, not duplicated per provider: `OPENJSON` appears
+32 times, `SYSUTCDATETIME` 116, `OUTER APPLY` 27, across 32 files. Pointed
+at PostgreSQL this application selects Npgsql and then fails on nearly every
+query it runs. The provider switch is a guard against a half-configured
+deployment, not a way back — and the way back, if one is ever wanted, is the
+git history rather than a setting.
 
 **A harness.** `AutoPartsHub.Tests/SqlServer` runs against a real engine and
 skips, visibly, when there is not one — so the suite still finishes in seconds
 on a machine with nothing installed.
 
-Five engine differences were found by the engine refusing them, and are fixed:
+**The near-miss search (T-067).** The last PostgreSQL-only feature, and the
+only one that was a feature rather than a translation. pg_trgm's
+`word_similarity` scanned the whole catalogue on every search that came up
+empty; it is two index seeks now, with the acceptance criterion asserted from
+the execution plan. Section 5.
+
+Four engine differences were found by the engine refusing them, and are fixed:
 a self-referencing foreign key SQL Server will not cascade, three filtered
 index predicates written as `= true`, forty-three `nvarchar(max)` columns
 that could not be indexed, and two check constraints that compare booleans.
+(This said "five" and then listed four. The fifth it was reaching for is the
+one nothing refused — `CURRENT_TIMESTAMP` being local time — which is in
+section 3, where it belongs: it was found by an assertion, not by a refusal.)
 
 ## The one assumption that held
 
@@ -94,20 +111,61 @@ boolean type at all: a comparison is a condition, not a value, and there is
 nothing to put on either side of that `=`. Both became the disjunction they
 mean.
 
-### 2. ~~The dialect~~ — one statement left
+### 2. ~~The dialect~~ — one refusal, and it is the instance's
 
-`node tools/sql-dialect-check.mjs` extracts all 173 raw statements, replaces
+`node tools/sql-dialect-check.mjs` extracts all 176 raw statements, replaces
 each `{interpolation}` with NULL, and writes a batch that asks SQL
 Server to parse and bind every one of them under `SET NOEXEC ON` — so names
 are checked and nothing runs. Today:
 
-> **1 of 172.** The remaining statement is the search's fuzzy fallback, which
-> uses pg_trgm's `word_similarity`. There is no SQL Server equivalent and there
-> was never going to be one — the backlog already scopes its replacement as
-> T-067, a full-text catalogue on names and a prefix seek on numbers. That is a
-> feature to build rather than a line to rewrite.
+> **1 of 176**, and that one is not about the statement:
 >
-> The count went 108, 86, 61, 45, 33, 20, 13, 7, 3, 1.
+> ```
+> Cannot use a CONTAINS or FREETEXT predicate on table 'Product'
+> because it is not full-text indexed.
+> ```
+>
+> It is the near-miss search's name lane (T-067). The statement parses and
+> binds; what is missing is Full-Text Search, which LocalDB cannot host on any
+> edition. On an instance that has the component the migration creates the
+> catalogue and this refusal goes away — and on one that does not, the
+> application asks the same question at startup and takes the other lane
+> rather than failing. See `FullTextSearch`.
+>
+> The count went 108, 86, 61, 45, 33, 20, 13, 7, 3, 2.
+
+**A correction.** This section previously said "1 of 172", and that was wrong
+in a way worth recording rather than editing away. Two statements were being
+refused: the fuzzy fallback everyone knew about, and `VehicleFinder`'s options
+query, whose year filter was the one of nine left as the bare boolean
+PostgreSQL allows in a select list. The second was sitting in the same output
+under its own marker and was read as the first.
+
+That statement would have failed on every call — nothing in it half worked,
+because the column it produces is compared to `1` eight times further down the
+same query. It had also acquired a second fault that no parse check could have
+found: the year branch of its UNION returns a number where every other branch
+returns a name, so the whole result tried to convert "Renault" to bigint. The
+cast that prevented it in the original was removed as one of the redundant
+ones, and it was not redundant.
+
+Both are fixed, and `VehicleFinderTests` now runs the finder against real rows
+instead of parsing it.
+
+### 2a. What a parse check cannot see
+
+Worth stating plainly, because two bugs escaped through it:
+
+- **It does not evaluate constants.** `regexp_replace(x, p, '', 'g')` binds
+  perfectly — SQL Server's fourth argument is `start`, an int, and the `'g'`
+  is converted only when the statement runs, where it fails every time. Six
+  statements carried it. They are gone now: the normalised form is a stored
+  column, so no query computes one.
+- **It does not resolve union types.** Every branch parses; the conversion
+  between them happens on execution.
+
+Both classes are caught by the same thing, which is running the statement
+against rows.
 
 What is in them, counted in the SQL itself:
 
@@ -120,7 +178,7 @@ What is in them, counted in the SQL itself:
 | `= ANY(@array)` | 20 | `IN (SELECT value FROM OPENJSON(@json))` |
 | `ILIKE` | 14 | `LIKE` — the default collation is already case-insensitive |
 | `now()` | 12 | `SYSUTCDATETIME()` |
-| `similarity()`, `unnest()` | 12 | full-text and `OPENJSON` — see below |
+| `similarity()`, `unnest()` | 12 | prefix seeks, full text, and `OPENJSON` — see below |
 | `ON CONFLICT` | 5 | `MERGE`, or `UPDATE` then `INSERT WHERE NOT EXISTS` |
 | `RETURNING` | 4 | `OUTPUT` |
 | `to_char` | 4 | `FORMAT` / `CONVERT` |
@@ -131,10 +189,11 @@ Most of it is mechanical. Three parts are not:
   Server has no equivalent parameter. `OPENJSON` over a JSON-serialised array
   is the safe answer — `STRING_SPLIT` would break on any value containing the
   delimiter, and part numbers are caller input.
-- **`pg_trgm` similarity.** The search's fuzzy fallback, used when nothing
-  matched as typed. There is no equivalent; the backlog already specifies what
+- **`pg_trgm` similarity.** The search's fallback, used when nothing matched
+  as typed. There is no equivalent, and the backlog already specified what
   replaces it (T-067: a full-text catalogue on names, a prefix seek on
-  numbers), so this is that task arriving early rather than a translation.
+  numbers), so it was that task arriving early rather than a translation. Done
+  — see section 6.
 - **`LIMIT` without `ORDER BY`.** PostgreSQL allows it; `OFFSET … FETCH`
   requires an order. Each site needs a decision about what the order should be,
   and "whatever the database returned" is not one — that is how a paged list
@@ -194,7 +253,66 @@ moved and half not — and the provider's own complaint about an unrecognised
 keyword reads as a typo in the string rather than as the wrong engine. That
 now refuses at startup and says which half is left over.
 
-### 5. The cutover
+
+### 5. T-067 — the near-miss search
+
+The last PostgreSQL-only thing in the application, and the only one that was a
+feature rather than a translation.
+
+**What it was.** When a search matched nothing, `word_similarity` scored the
+query against every product name, every manufacturer name and every part
+number, kept anything over 0.45 and sorted it. A full scan on every search
+that came up empty — which is exactly the search a customer repeats, having
+typed it wrong once.
+
+**What it is.** Two lanes, each an index seek, each capped at 25:
+
+| lane | reached by | index |
+|---|---|---|
+| part numbers | `partNumberNormalised LIKE 'ABC12%'` | `Product_partNumberNormalised_idx`, `Interchange_targetPartNoNormalised_idx` |
+| names, with full text | `CONTAINSTABLE` with prefix terms | the `AutoPartsSearch` catalogue |
+| names, without | `name LIKE 'brake pa%'` | `Product_name_idx` |
+| manufacturers | `name LIKE 'MANN%'` | `Manufacturer_name_key` |
+
+Numbers are asked first: three normalised characters of a part number agreeing
+is a deliberate act, three characters of a name agreeing is a coincidence the
+catalogue is full of.
+
+**The normalised columns.** Part numbers are stored as they are printed —
+`0 986 424 815`, `W712/30` — and every lookup used to strip the separators
+per row with `regexp_replace`, which cannot use an index. They are stored and
+indexed now (`PERSISTED` computed columns), so the database owns the rule
+rather than whichever of the three writers remembered it, and the bulk lookup
+seeks too. Two comments in the code had asked for exactly this.
+
+**What was lost.** Trigram similarity matched a typo in the *middle* of a word:
+"brkae pad" scored against "Brake pad set, front". Neither lane does — a prefix
+seek and a full-text prefix term both need the start to be right. That is the
+same property as the scan going away, seen from the other side. Truncation
+("brake pa", "0 986 42") and one wrong word among right ones still work, which
+is most of what a search box receives.
+
+**What is not verified.** The `CONTAINSTABLE` statement has never been
+executed. LocalDB cannot host Full-Text Search, so there is no way to run it on
+this machine — it parses, it binds, and it is refused for the missing
+component. Everything around it is verified: the lane that runs without full
+text, the capability check that chooses between them, and the migration's
+refusal to create a catalogue on an instance that cannot have one. **When the
+hosting decision lands (BLK-003) on an instance with the component installed,
+that statement is the first thing to exercise** —
+`FullTextIsNotAvailableHereAndTheSearchKnowsIt` is written to fail there,
+which is how the machine announces itself.
+
+**The acceptance criterion** — "no leading wildcard, no wide scan" — is
+asserted from the execution plan, not from the SQL. `LIKE 'ABC%'` on a column
+with no index reads identically to the version that seeks; only the optimizer
+can tell them apart. `PlanCapture` intercepts each statement as the
+application sends it and asks SQL Server to compile it against three thousand
+products, three thousand cross-references and five hundred brands. One test
+points the same detector at the query that still scans on purpose, so "no
+scans" cannot pass by seeing nothing.
+
+### 6. The cutover
 
 The two applications share one database today. Whatever else is decided, that
 stops being true the moment this one is pointed at SQL Server — so the

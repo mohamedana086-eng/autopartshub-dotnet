@@ -108,6 +108,41 @@ public sealed class Catalogue : IAsyncLifetime
             Id = "sys-brakes", Name = "Brakes", Slug = "brakes", Icon = "disc", Order = 1,
         });
 
+        // Three vehicles the finder can be asked about. Deliberately uneven:
+        // one variant carries no body type and no region, because a car
+        // nobody has classified must not vanish from a search that filters on
+        // a field it does not have — which is the rule the finder exists for
+        // and the one a rewritten filter breaks silently.
+        Db.VehicleMakes.Add(new VehicleMake { Id = "mk-renault", Name = "Renault" });
+
+        Db.VehicleModels.Add(new VehicleModel
+        {
+            Id = "mo-megane", MakeId = "mk-renault", Name = "Megane",
+            Series = "III", YearFrom = 2008, YearTo = 2016,
+        });
+
+        Db.VehicleVariants.AddRange(
+            new VehicleVariant
+            {
+                Id = "vv-megane-hatch", ModelId = "mo-megane", Name = "1.5 dCi",
+                YearFrom = 2009, YearTo = 2015, BodyType = "hatchback",
+                SteeringSide = "left", Transmission = "manual", Region = "eu",
+                EngineCode = "K9K", Fuel = "diesel", PowerKw = 81,
+            },
+            new VehicleVariant
+            {
+                Id = "vv-megane-estate", ModelId = "mo-megane", Name = "1.6 16V",
+                YearFrom = 2010, YearTo = 2016, BodyType = "estate",
+                SteeringSide = "left", Transmission = "automatic", Region = "eu",
+                EngineCode = "K4M", Fuel = "petrol", PowerKw = 81,
+            },
+            new VehicleVariant
+            {
+                // Unclassified on purpose — see above.
+                Id = "vv-megane-unknown", ModelId = "mo-megane", Name = "1.9 dCi",
+                YearFrom = 2009, YearTo = 2014, Fuel = "diesel",
+            });
+
         Db.Manufacturers.AddRange(
             new Manufacturer { Id = "man-bosch", Name = "BOSCH", IsOem = false },
             new Manufacturer { Id = "man-mann", Name = "MANN-FILTER", IsOem = false });

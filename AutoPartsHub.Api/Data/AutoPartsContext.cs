@@ -68,16 +68,17 @@ public partial class AutoPartsContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // pg_trgm used to be declared here, for the fuzzy fallback the search
-        // falls back to when nothing matched as typed. It is the one piece of
-        // this model that was a statement about which database was underneath,
-        // and SQL Server has no equivalent extension — the fallback becomes a
-        // full-text catalogue plus a prefix seek there, which is T-067 and a
-        // change to the query rather than to the model.
+        // pg_trgm used to be declared here, for the search's fallback when
+        // nothing matched as typed. It was the one piece of this model that
+        // was a statement about which database was underneath, and SQL Server
+        // has no equivalent extension.
         //
         // Removed rather than guarded: a model that declares an extension for
         // one provider is a model that cannot be migrated by the other, and
         // the extension was never what made the search work — the query was.
+        // What replaced it (T-067) is two index seeks, and the columns and
+        // indexes they need are in AutoPartsContext.SearchIndexes.cs — beside
+        // the model rather than in it, for the reasons stated there.
 
         modelBuilder.Entity<Cart>(entity =>
         {

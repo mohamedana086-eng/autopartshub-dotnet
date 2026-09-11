@@ -54,22 +54,21 @@ public static class BulkLookupEndpoints
                 return Results.BadRequest(new { error = "No usable part numbers in that file." });
             }
 
-            // The normalised form is not stored, so both of these are scans —
-            // fine for a catalogue this size, and the same statements the other
-            // API runs.
+            // The normalised form is a stored, indexed column, so both of
+            // these seek rather than deriving a value per row to compare — see
+            // AutoPartsContext.SearchIndexSql. They are the same statements the
+            // other API runs.
             var direct = await db.Database.SqlQuery<NormalisedMatch>($"""
-                SELECT "id" AS "Id",
-                       regexp_replace(upper("partNumber"), '[^A-Z0-9]', '', 'g') AS "Norm"
+                SELECT "id" AS "Id", "partNumberNormalised" AS "Norm"
                 FROM "Product"
-                WHERE regexp_replace(upper("partNumber"), '[^A-Z0-9]', '', 'g') IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(needles)}))
+                WHERE "partNumberNormalised" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(needles)}))
                 """).ToListAsync(ct);
 
             var viaInterchange = await db.Database.SqlQuery<InterchangeMatch>($"""
-                SELECT i."sourceId" AS "Id",
-                       regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') AS "Norm",
+                SELECT i."sourceId" AS "Id", i."targetPartNoNormalised" AS "Norm",
                        i."targetPartNo" AS "Target"
                 FROM "Interchange" i
-                WHERE regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(needles)}))
+                WHERE i."targetPartNoNormalised" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(needles)}))
                 """).ToListAsync(ct);
 
             var ctx = await pricing.LoadAsync(http, ct);
