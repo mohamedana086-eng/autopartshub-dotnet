@@ -48,7 +48,7 @@ public static class AdminPricingWriteEndpoints
             var id = Ids.New();
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "Currency" ("id", "code", "name", "symbol", "rate", "isBase", "active")
-                VALUES ({id}, {c.Code}, {c.Name}, {c.Symbol}, {c.Rate}, FALSE, {c.Active})
+                VALUES ({id}, {c.Code}, {c.Name}, {c.Symbol}, {c.Rate}, 0, {c.Active})
                 """, ct);
 
             return Results.Json(new { currency = await CurrencyById(db, id, ct) }, statusCode: 201);

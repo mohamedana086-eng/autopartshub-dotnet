@@ -132,7 +132,7 @@ public static class SupplierSignupEndpoints
                     INSERT INTO "Supplier" ("id", "name", "code", "slug", "description", "country",
                                             "active", "approvedAt")
                     VALUES ({supplierId}, {company}, {code}, {slug}, {description}, {country},
-                            FALSE, NULL)
+                            0, NULL)
                     """, ct);
 
                 // No categoryId: a pricing tier is what a *customer* is quoted
@@ -207,7 +207,7 @@ public static class SupplierSignupEndpoints
                        s."description" AS "Description", s."country" AS "Country",
                        n."count" AS "ProductCount",
                        c."name" AS "ContactName", c."email" AS "ContactEmail",
-                       to_char(c."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "SignedUpAt"
+                       (CONVERT(varchar(23), c."createdAt", 126) + 'Z') AS "SignedUpAt"
                 FROM "Supplier" s
                 OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "Product" p WHERE p."supplierId" = s."id"
@@ -326,7 +326,7 @@ public static class SupplierSignupEndpoints
         AutoPartsContext db, string id, CancellationToken ct) =>
         (await db.Database.SqlQuery<ApprovalStateRow>($"""
             SELECT "id" AS "Id", "name" AS "Name", "active" AS "Active",
-                   to_char("approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt"
+                   (CONVERT(varchar(23), "approvedAt", 126) + 'Z') AS "ApprovedAt"
             FROM "Supplier" WHERE "id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 }

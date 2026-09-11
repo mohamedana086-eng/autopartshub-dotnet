@@ -76,7 +76,7 @@ public static partial class VinLog
                 VALUES ({Ids.New()}, {p.Pattern}, {p.Wmi}, {modelYear}, {makeName}, {candidateCount})
                 ON CONFLICT ("pattern") DO UPDATE
                   SET "lookups" = "VinLookup"."lookups" + 1,
-                      "lastSeenAt" = now(),
+                      "lastSeenAt" = SYSUTCDATETIME(),
                       -- Refreshed, because the catalogue grows: the same
                       -- pattern asked again next month may match a make we did
                       -- not carry before. The measurement is of what we can

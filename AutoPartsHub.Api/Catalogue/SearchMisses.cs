@@ -93,7 +93,7 @@ public static partial class SearchMisses
                 VALUES ({Ids.New()}, {term}, {narrowed})
                 ON CONFLICT ("term", "narrowed") DO UPDATE
                   SET "searches" = "SearchMiss"."searches" + 1,
-                      "lastSeenAt" = now()
+                      "lastSeenAt" = SYSUTCDATETIME()
                 """, ct);
         }
         catch

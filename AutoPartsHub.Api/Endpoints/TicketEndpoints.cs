@@ -446,7 +446,7 @@ public static class TicketEndpoints
                 await db.Database.ExecuteSqlAsync($"""
                     INSERT INTO "TicketMessage" ("id", "ticketId", "authorId", "authorName",
                                                  "fromStaff", "internal", "body")
-                    VALUES ({Ids.New()}, {id}, {clientId}, {authorName}, FALSE, FALSE, {input.Body})
+                    VALUES ({Ids.New()}, {id}, {clientId}, {authorName}, 0, 0, {input.Body})
                     """, ct);
 
                 await transaction.CommitAsync(ct);

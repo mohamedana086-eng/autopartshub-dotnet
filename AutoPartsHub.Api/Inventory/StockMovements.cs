@@ -136,7 +136,7 @@ public static class StockMovements
             UPDATE "StockLevel" s
             SET "quantity" = s."quantity" + (a."quantity" * {change.Quantity}),
                 "reserved" = s."reserved" + (a."quantity" * {change.Reserved}),
-                "updatedAt" = now()
+                "updatedAt" = SYSUTCDATETIME()
             FROM "OrderItemAllocation" a
             JOIN "OrderItem" i ON i."id" = a."orderItemId"
             WHERE i."orderId" = {orderId}

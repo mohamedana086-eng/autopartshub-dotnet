@@ -36,7 +36,7 @@ public static class OrderProbeEndpoints
             var released = await db.Database.ExecuteSqlAsync($"""
                 UPDATE "StockLevel" s
                 SET "reserved" = s."reserved" - a."quantity",
-                    "updatedAt" = now()
+                    "updatedAt" = SYSUTCDATETIME()
                 FROM "OrderItemAllocation" a
                 JOIN "OrderItem" i ON i."id" = a."orderItemId"
                 WHERE i."orderId" = {body.OrderId}

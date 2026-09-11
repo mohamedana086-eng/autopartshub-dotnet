@@ -129,7 +129,7 @@ public sealed class SearchQueries(AutoPartsContext db)
               -- fails to match", so the number of tokens is a value rather
               -- than a shape.
               OR NOT EXISTS (
-                SELECT 1 FROM unnest({tokens}::text[]) AS tok
+                SELECT 1 FROM (SELECT value COLLATE DATABASE_DEFAULT AS tok FROM OPENJSON({SqlList.Of(tokens)})) AS tok_rows
                 WHERE NOT (
                   p."partNumber" LIKE '%' + tok + '%'
                   OR p."name" LIKE '%' + tok + '%'
@@ -240,7 +240,7 @@ public sealed class SearchQueries(AutoPartsContext db)
                 ({hasQuery} IS NULL OR {hasQuery} = 0)
                 OR p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 OR NOT EXISTS (
-                  SELECT 1 FROM unnest({tokens}::text[]) AS tok
+                  SELECT 1 FROM (SELECT value COLLATE DATABASE_DEFAULT AS tok FROM OPENJSON({SqlList.Of(tokens)})) AS tok_rows
                   WHERE NOT (
                     p."partNumber" LIKE '%' + tok + '%'
                     OR p."name" LIKE '%' + tok + '%'

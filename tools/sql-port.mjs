@@ -164,6 +164,37 @@ const lineRewrites = {
   // means what ILIKE meant here.
   ilike: (sql) => sql.replace(/\bILIKE\b/g, 'LIKE'),
 
+  functions: (sql) =>
+    sql
+      // now() is the transaction's start time in PostgreSQL and these all want
+      // "when this row was touched". SYSUTCDATETIME is the UTC equivalent;
+      // GETDATE would be the server's local zone, and every timestamp in this
+      // schema is UTC.
+      .replace(/\bnow\(\)/g, 'SYSUTCDATETIME()')
+      // The ISO-8601 string the storefront parses. Style 126 is exactly
+      // `yyyy-mm-ddThh:mi:ss.mmm`, which is the format string on the left
+      // without its trailing Z — so the Z is appended rather than formatted.
+      // CONVERT rather than FORMAT: FORMAT goes through the CLR and is an
+      // order of magnitude slower per row, and these run over lists.
+      // NULL survives both, which the supplier list depends on: an
+      // unapproved supplier has no approval date.
+      .replace(
+        /\bto_char\(\s*([^,]+?)\s*,\s*'YYYY-MM-DD"T"HH24:MI:SS\.MS"Z"'\s*\)/g,
+        (_, column) => `(CONVERT(varchar(23), ${column}, 126) + 'Z')`
+      )
+      // A single-array unnest is a table of one column. The derived table
+      // keeps the column's name, so the body that reads `tok` still reads it.
+      .replace(
+        /\bunnest\(\{([^}]+)\}::text\[\]\)\s+AS\s+(\w+)/g,
+        (_, list, alias) =>
+          `(SELECT value COLLATE DATABASE_DEFAULT AS ${alias} ` +
+          `FROM OPENJSON({SqlList.Of(${list})})) AS ${alias}_rows`
+      )
+      // Bare boolean literals left in VALUES lists and COALESCE, where there
+      // is no comparison for the earlier pass to have matched.
+      .replace(/(?<![\w'"])TRUE(?![\w'"])/g, '1')
+      .replace(/(?<![\w'"])FALSE(?![\w'"])/g, '0'),
+
   // `||` does not concatenate in T-SQL.
   concat: (sql) => sql.replace(/'%'\s*\|\|\s*(\w+)\s*\|\|\s*'%'/g, "'%' + $1 + '%'"),
 };

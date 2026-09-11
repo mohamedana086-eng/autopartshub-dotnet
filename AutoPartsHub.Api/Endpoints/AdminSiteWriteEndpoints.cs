@@ -402,7 +402,7 @@ public static class AdminSiteWriteEndpoints
                    c."code" AS "PurchaseCurrencyCode",
                    s."priority" AS "Priority", s."minOrderAmount" AS "MinOrderAmount",
                    s."markupPercent" AS "MarkupPercent",
-                   s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
+                   s."active" AS "Active", (CONVERT(varchar(23), s."approvedAt", 126) + 'Z') AS "ApprovedAt",
                    p."count" AS "ProductCount"
             FROM "Supplier" s
             LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"

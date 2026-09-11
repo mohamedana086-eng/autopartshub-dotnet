@@ -453,7 +453,7 @@ public static class AdminPriceListWriteEndpoints
         await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "PriceList" ("id", "name", "description", "sourceName", "active", "updatedAt")
             VALUES ({id}, {details.Name}, {details.Description}, {details.SourceName},
-                    FALSE, CURRENT_TIMESTAMP)
+                    0, CURRENT_TIMESTAMP)
             """, ct);
 
         for (var at = 0; at < rows.Count; at += InsertChunk)

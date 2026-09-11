@@ -98,7 +98,7 @@ public sealed class VehicleFinder(AutoPartsContext db)
             FROM rows
             JOIN LATERAL generate_series(
               rows."yearFrom",
-              LEAST(COALESCE(rows."yearTo", 9999), EXTRACT(YEAR FROM now()) + 1)
+              LEAST(COALESCE(rows."yearTo", 9999), EXTRACT(YEAR FROM SYSUTCDATETIME()) + 1)
             ) AS y("year") ON 1 = 1
             WHERE "fMake" AND "fSeries" AND "fModel" AND "fBody" AND "fSteering"
               AND "fTransmission" AND "fRegion" AND "fEngine"

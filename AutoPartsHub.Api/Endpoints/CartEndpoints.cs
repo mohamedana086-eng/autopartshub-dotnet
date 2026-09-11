@@ -280,8 +280,8 @@ public static class CartEndpoints
 
         var cartId = (await db.Database.SqlQuery<string>($"""
             INSERT INTO "Cart" ("id", "clientId", "updatedAt")
-            VALUES ({Ids.New()}, {clientId}, now())
-            ON CONFLICT ("clientId") DO UPDATE SET "updatedAt" = now()
+            VALUES ({Ids.New()}, {clientId}, SYSUTCDATETIME())
+            ON CONFLICT ("clientId") DO UPDATE SET "updatedAt" = SYSUTCDATETIME()
             RETURNING "id" AS "Value"
             """).ToListAsync(ct)).Single();
 
