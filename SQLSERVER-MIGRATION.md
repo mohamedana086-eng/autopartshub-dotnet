@@ -94,16 +94,20 @@ boolean type at all: a comparison is a condition, not a value, and there is
 nothing to put on either side of that `=`. Both became the disjunction they
 mean.
 
-### 2. The dialect
+### 2. ~~The dialect~~ — one statement left
 
 `node tools/sql-dialect-check.mjs` extracts all 173 raw statements, replaces
 each `{interpolation}` with NULL, and writes a batch that asks SQL
 Server to parse and bind every one of them under `SET NOEXEC ON` — so names
 are checked and nothing runs. Today:
 
-> **108 of 172 statements SQL Server refuses**, down from 134, and every one of
-> the remaining failures is dialect rather than a missing name. Sixty-four
-> already pass unchanged.
+> **1 of 172.** The remaining statement is the search's fuzzy fallback, which
+> uses pg_trgm's `word_similarity`. There is no SQL Server equivalent and there
+> was never going to be one — the backlog already scopes its replacement as
+> T-067, a full-text catalogue on names and a prefix seek on numbers. That is a
+> feature to build rather than a line to rewrite.
+>
+> The count went 108, 86, 61, 45, 33, 20, 13, 7, 3, 1.
 
 What is in them, counted in the SQL itself:
 
@@ -147,7 +151,25 @@ to a `TOP` that lost its `ORDER BY` parses perfectly and returns different
 rows. Seeded data and assertions on results are the only thing that catches
 that, which is T-003 and T-025.
 
-### 4. The cutover
+### 4. What has not been touched
+
+The dialect check reads statements; it does not run the application. Two
+things it cannot see are still PostgreSQL-shaped:
+
+- **Exception handling.** `AdminOrderWriteEndpoints` catches
+  `PostgresException` to turn a CHECK violation into a sentence an admin can
+  act on. Against SQL Server that becomes `SqlException` with a different
+  error number, so the catch will not fire and the admin gets a stack trace
+  instead.
+- **`ConnectionString.Normalise`** still builds its output with Npgsql's
+  connection-string builder, which is right for as long as PostgreSQL is the
+  deployed engine and wrong the moment it is not.
+
+Neither is a translation: both are decisions about what the application does
+when the database refuses something, and both want a test that makes the
+database refuse it.
+
+### 5. The cutover
 
 The two applications share one database today. Whatever else is decided, that
 stops being true the moment this one is pointed at SQL Server — so the
