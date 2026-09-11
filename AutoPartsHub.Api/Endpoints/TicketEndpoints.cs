@@ -490,7 +490,7 @@ public static class TicketEndpoints
             """, ct);
 
         await db.Database.ExecuteSqlAsync($"""
-            UPDATE "Ticket" SET "status" = {status}, "lastMessageAt" = CURRENT_TIMESTAMP
+            UPDATE "Ticket" SET "status" = {status}, "lastMessageAt" = SYSUTCDATETIME()
             WHERE "id" = {ticketId}
             """, ct);
 

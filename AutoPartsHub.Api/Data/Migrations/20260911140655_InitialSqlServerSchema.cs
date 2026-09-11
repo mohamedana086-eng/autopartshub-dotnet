@@ -57,7 +57,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     markupMinAmount = table.Column<double>(type: "float", nullable: true),
                     sortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -97,7 +97,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     startsAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
                     endsAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     goodsCategoryId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true)
                 },
                 constraints: table =>
@@ -114,7 +114,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     description = table.Column<string>(type: "nvarchar(4000)", maxLength: 4000, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false),
                     sourceName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false),
                     markupPercent = table.Column<double>(type: "float", nullable: true)
                 },
@@ -131,8 +131,8 @@ namespace AutoPartsHub.Api.Data.Migrations
                     term = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     narrowed = table.Column<bool>(type: "bit", nullable: false, defaultValue: false),
                     searches = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
-                    firstSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    lastSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    firstSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
+                    lastSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -179,8 +179,8 @@ namespace AutoPartsHub.Api.Data.Migrations
                     makeName = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     candidateCount = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
                     lookups = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
-                    firstSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    lastSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    firstSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
+                    lastSeenAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     decodedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
                     decoded = table.Column<bool>(type: "bit", nullable: true),
                     decodedModel = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
@@ -204,7 +204,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     address = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
                     priority = table.Column<int>(type: "int", nullable: false),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -281,7 +281,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     rejected = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
                     rejectedStored = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
                     error = table.Column<string>(type: "nvarchar(4000)", maxLength: 4000, nullable: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -329,7 +329,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     phone = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     warehouseId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -353,7 +353,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     role = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'RETAIL'"),
                     city = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     categoryId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     discountPercent = table.Column<double>(type: "float", nullable: false),
                     currencyId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     salesManagerId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
@@ -401,7 +401,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     basePrice = table.Column<double>(type: "float", nullable: false),
                     currency = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'EUR'"),
                     stockDays = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     supplierId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     tecDocId = table.Column<int>(type: "int", nullable: true),
                     goodsCategoryId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
@@ -497,7 +497,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                 {
                     id = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     clientId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false)
                 },
                 constraints: table =>
@@ -522,7 +522,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     body = table.Column<string>(type: "nvarchar(4000)", maxLength: 4000, nullable: true),
                     link = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: true),
                     readAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -543,7 +543,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     reference = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     clientId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     status = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'order_is_sent'"),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
                     currencyCode = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValueSql: "'EUR'"),
                     currencyRate = table.Column<double>(type: "float", nullable: false, defaultValue: 1.0),
                     carrier = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
@@ -575,7 +575,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     tokenHash = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     expiresAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false),
                     usedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -649,7 +649,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     code = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     kind = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValue: "other"),
                     sortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -671,7 +671,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     url = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: false),
                     alt = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     sortOrder = table.Column<int>(type: "int", nullable: false),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -694,7 +694,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     value = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     unit = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     sortOrder = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -747,8 +747,8 @@ namespace AutoPartsHub.Api.Data.Migrations
                     stockDays = table.Column<int>(type: "int", nullable: true),
                     supplierPartNumber = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     active = table.Column<bool>(type: "bit", nullable: false, defaultValue: true),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
+                    updatedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -801,7 +801,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     cartId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     productId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     quantity = table.Column<int>(type: "int", nullable: false, defaultValue: 1),
-                    addedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    addedAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -857,8 +857,8 @@ namespace AutoPartsHub.Api.Data.Migrations
                     orderId = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: true),
                     subject = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false),
                     status = table.Column<string>(type: "nvarchar(400)", maxLength: 400, nullable: false, defaultValue: "open"),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP"),
-                    lastMessageAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()"),
+                    lastMessageAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {
@@ -913,7 +913,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                     fromStaff = table.Column<bool>(type: "bit", nullable: false),
                     @internal = table.Column<bool>(name: "internal", type: "bit", nullable: false, defaultValue: false),
                     body = table.Column<string>(type: "nvarchar(4000)", maxLength: 4000, nullable: false),
-                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "CURRENT_TIMESTAMP")
+                    createdAt = table.Column<DateTime>(type: "datetime2(3)", precision: 3, nullable: false, defaultValueSql: "SYSUTCDATETIME()")
                 },
                 constraints: table =>
                 {

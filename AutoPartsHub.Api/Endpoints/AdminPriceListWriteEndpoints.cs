@@ -461,7 +461,7 @@ public static class AdminPriceListWriteEndpoints
         await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "PriceList" ("id", "name", "description", "sourceName", "active", "updatedAt")
             VALUES ({id}, {details.Name}, {details.Description}, {details.SourceName},
-                    0, CURRENT_TIMESTAMP)
+                    0, SYSUTCDATETIME())
             """, ct);
 
         for (var at = 0; at < rows.Count; at += InsertChunk)
@@ -539,7 +539,7 @@ public static class AdminPriceListWriteEndpoints
                    "markupPercent" = CASE WHEN {markupSent} = 1
                                           THEN {markupPercent}
                                           ELSE "markupPercent" END,
-                   "updatedAt" = CURRENT_TIMESTAMP
+                   "updatedAt" = SYSUTCDATETIME()
              WHERE "id" = {id}
             """, ct);
 

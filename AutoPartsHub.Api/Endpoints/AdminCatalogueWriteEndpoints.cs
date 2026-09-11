@@ -344,13 +344,13 @@ public static class AdminCatalogueWriteEndpoints
                       UPDATE SET "quantity" = source."quantity",
                                  "reserved" = source."reserved",
                                  "binLocation" = source."binLocation",
-                                 "updatedAt" = CURRENT_TIMESTAMP
+                                 "updatedAt" = SYSUTCDATETIME()
                     WHEN NOT MATCHED THEN
                       INSERT ("id", "productId", "warehouseId", "quantity",
                               "reserved", "binLocation", "updatedAt")
                       VALUES ({Ids.New()}, source."productId", source."warehouseId",
                               source."quantity", source."reserved", source."binLocation",
-                              CURRENT_TIMESTAMP);
+                              SYSUTCDATETIME());
                     """, ct);
             }
 

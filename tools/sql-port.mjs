@@ -174,6 +174,22 @@ const lineRewrites = {
   // means what ILIKE meant here.
   ilike: (sql) => sql.replace(/\bILIKE\b/g, 'LIKE'),
 
+  /**
+   * One clock.
+   *
+   * CURRENT_TIMESTAMP is the server's LOCAL time in SQL Server;
+   * SYSUTCDATETIME is UTC. Translating PostgreSQL's now() to the second and
+   * leaving CURRENT_TIMESTAMP alone put both into the same columns — three
+   * hours apart on the machine this was found on, which is how a row ended up
+   * with a lastSeenAt earlier than its firstSeenAt.
+   *
+   * UTC wins because the schema is already UTC: the storefront writes these
+   * timestamps from JavaScript, every datetime2 here is declared to the
+   * millisecond so the two can be compared, and a column whose meaning depends
+   * on where the server is standing cannot be compared to anything.
+   */
+  utc: (sql) => sql.replace(/\bCURRENT_TIMESTAMP\b/g, 'SYSUTCDATETIME()'),
+
   functions: (sql) =>
     sql
       // now() is the transaction's start time in PostgreSQL and these all want

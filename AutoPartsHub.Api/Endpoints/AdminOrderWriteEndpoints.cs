@@ -96,7 +96,7 @@ public static class AdminOrderWriteEndpoints
                     UPDATE "Order"
                        SET "status" = {to.Status},
                            "statusReason" = {to.Reason},
-                           "statusChangedAt" = CURRENT_TIMESTAMP,
+                           "statusChangedAt" = SYSUTCDATETIME(),
                            "statusChangedById" = {byId},
                            "trackingNumber" = CASE WHEN {to.TrackingNumber is not null} = 1
                                                    THEN {to.TrackingNumber}

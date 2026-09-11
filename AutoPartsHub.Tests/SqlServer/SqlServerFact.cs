@@ -49,19 +49,35 @@ public static class SqlServer
     /// <remarks>
     /// <c>TEST_SQLSERVER</c> overrides, so that CI can point at a container.
     /// The default is the LocalDB instance a Windows development machine has
-    /// once the SQL Server tooling is installed, and it is the same connection
-    /// <see cref="DesignTimeContextFactory"/> migrates.
+    /// once the SQL Server tooling is installed.
+    ///
+    /// A DIFFERENT DATABASE from the one <see cref="DesignTimeContextFactory"/>
+    /// migrates, and deliberately. The seeded tests below empty every table
+    /// before they run; pointed at a developer's own database that would throw
+    /// away whatever they were in the middle of looking at.
     /// </remarks>
     public static string ConnectionString =>
         Environment.GetEnvironmentVariable("TEST_SQLSERVER") is { Length: > 0 } configured
             ? configured
-            : DesignTimeContextFactory.LocalDb;
+            : DesignTimeContextFactory.LocalDb.Replace(
+                "Database=AutoPartsHub;", "Database=AutoPartsHub_Tests;", StringComparison.Ordinal);
 
     private static readonly Lazy<string?> Probe = new(() =>
     {
         try
         {
-            using var connection = new SqlConnection(ConnectionString);
+            // Asks whether the SERVER is there, not whether the test database
+            // is: the fixture creates that one by running the migrations, so
+            // its absence is the normal state on a machine that has never run
+            // these. Probing it directly made every test skip on the first run
+            // and pass on the second, which is worse than either.
+            var master = new SqlConnectionStringBuilder(ConnectionString)
+            {
+                InitialCatalog = "master",
+                ConnectTimeout = 5,
+            };
+
+            using var connection = new SqlConnection(master.ConnectionString);
             connection.Open();
             return null;
         }

@@ -17,22 +17,10 @@ namespace AutoPartsHub.Tests.SqlServer;
 /// wrong rows just as happily as one that returns the right ones. Everything
 /// below is about what comes back.
 /// </remarks>
-public class SqlListTests : IAsyncLifetime
+[Collection(CatalogueCollection.Name)]
+public class SqlListTests(Catalogue catalogue)
 {
-    private AutoPartsContext _db = null!;
-
-    public Task InitializeAsync()
-    {
-        if (SqlServer.Unavailable is not null) return Task.CompletedTask;
-
-        _db = new AutoPartsContext(new DbContextOptionsBuilder<AutoPartsContext>()
-            .UseSqlServer(SqlServer.ConnectionString)
-            .Options);
-
-        return Task.CompletedTask;
-    }
-
-    public Task DisposeAsync() => _db?.DisposeAsync().AsTask() ?? Task.CompletedTask;
+    private AutoPartsContext _db => catalogue.Db;
 
     /// <summary>The values a list parameter actually delivers.</summary>
     private Task<List<string>> ReadBack(IEnumerable<string>? values) =>

@@ -79,7 +79,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasPrecision(3)
@@ -107,7 +107,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("addedAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("CartId")
                         .IsRequired()
@@ -160,7 +160,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("CurrencyId")
                         .HasMaxLength(400)
@@ -372,7 +372,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Description")
                         .HasMaxLength(400)
@@ -515,7 +515,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateTime?>("EndsAt")
                         .HasPrecision(3)
@@ -642,7 +642,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Link")
                         .HasMaxLength(2048)
@@ -699,7 +699,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("CurrencyCode")
                         .IsRequired()
@@ -861,7 +861,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Description")
                         .HasMaxLength(4000)
@@ -916,7 +916,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Error")
                         .HasMaxLength(4000)
@@ -1100,7 +1100,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Currency")
                         .IsRequired()
@@ -1226,7 +1226,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Kind")
                         .IsRequired()
@@ -1276,7 +1276,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("ProductId")
                         .IsRequired()
@@ -1314,7 +1314,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Label")
                         .IsRequired()
@@ -1387,7 +1387,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1428,14 +1428,14 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("firstSeenAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateTime>("LastSeenAt")
                         .ValueGeneratedOnAdd()
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("lastSeenAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<bool>("Narrowed")
                         .ValueGeneratedOnAdd()
@@ -1646,7 +1646,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("ProductId")
                         .IsRequired()
@@ -1678,7 +1678,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("updatedAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.HasKey("Id")
                         .HasName("SupplierOffer_pkey");
@@ -1709,14 +1709,14 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateTime>("LastMessageAt")
                         .ValueGeneratedOnAdd()
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("lastMessageAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("OrderId")
                         .HasMaxLength(400)
@@ -1787,7 +1787,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<bool>("FromStaff")
                         .HasColumnType("bit")
@@ -2033,7 +2033,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateTime>("ExpiresAt")
                         .HasPrecision(3)
@@ -2115,14 +2115,14 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("firstSeenAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<DateTime>("LastSeenAt")
                         .ValueGeneratedOnAdd()
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("lastSeenAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<int>("Lookups")
                         .ValueGeneratedOnAdd()
@@ -2196,7 +2196,7 @@ namespace AutoPartsHub.Api.Data.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetime2(3)")
                         .HasColumnName("createdAt")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
 
                     b.Property<string>("Name")
                         .IsRequired()

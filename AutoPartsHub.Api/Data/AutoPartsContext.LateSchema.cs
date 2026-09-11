@@ -164,7 +164,7 @@ public partial class AutoPartsContext
             entity.Property(e => e.Unit).HasColumnName("unit");
             entity.Property(e => e.SortOrder).HasDefaultValue(0).HasColumnName("sortOrder");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
 
             entity.HasOne(d => d.Product).WithMany()
                 .HasForeignKey(d => d.ProductId)
@@ -188,7 +188,7 @@ public partial class AutoPartsContext
             entity.Property(e => e.Kind).HasDefaultValue("other").HasColumnName("kind");
             entity.Property(e => e.SortOrder).HasDefaultValue(0).HasColumnName("sortOrder");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
 
             entity.HasOne(d => d.Product).WithMany()
                 .HasForeignKey(d => d.ProductId)
@@ -213,7 +213,7 @@ public partial class AutoPartsContext
             entity.Property(e => e.SortOrder).HasDefaultValue(0).HasColumnName("sortOrder");
             entity.Property(e => e.Active).HasDefaultValue(true).HasColumnName("active");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
 
             // The four constraints the database already carries, said in a way
             // SQL Server accepts.
@@ -284,9 +284,9 @@ public partial class AutoPartsContext
             entity.Property(e => e.CandidateCount).HasDefaultValue(0).HasColumnName("candidateCount");
             entity.Property(e => e.Lookups).HasDefaultValue(1).HasColumnName("lookups");
             entity.Property(e => e.FirstSeenAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("firstSeenAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("firstSeenAt");
             entity.Property(e => e.LastSeenAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("lastSeenAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("lastSeenAt");
             entity.Property(e => e.DecodedAt).HasPrecision(3).HasColumnName("decodedAt");
             entity.Property(e => e.Decoded).HasColumnName("decoded");
             entity.Property(e => e.DecodedModel).HasColumnName("decodedModel");
@@ -310,9 +310,9 @@ public partial class AutoPartsContext
             entity.Property(e => e.Narrowed).HasDefaultValue(false).HasColumnName("narrowed");
             entity.Property(e => e.Searches).HasDefaultValue(1).HasColumnName("searches");
             entity.Property(e => e.FirstSeenAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("firstSeenAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("firstSeenAt");
             entity.Property(e => e.LastSeenAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("lastSeenAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("lastSeenAt");
         });
 
         modelBuilder.Entity<SupplierOffer>(entity =>
@@ -334,9 +334,9 @@ public partial class AutoPartsContext
             entity.Property(e => e.SupplierPartNumber).HasColumnName("supplierPartNumber");
             entity.Property(e => e.Active).HasDefaultValue(true).HasColumnName("active");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
             entity.Property(e => e.UpdatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("updatedAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("updatedAt");
 
             entity.HasOne(d => d.Product).WithMany()
                 .HasForeignKey(d => d.ProductId)
@@ -369,9 +369,9 @@ public partial class AutoPartsContext
             entity.Property(e => e.Subject).HasColumnName("subject");
             entity.Property(e => e.Status).HasDefaultValue("open").HasColumnName("status");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
             entity.Property(e => e.LastMessageAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("lastMessageAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("lastMessageAt");
 
             entity.HasOne(d => d.Client).WithMany()
                 .HasForeignKey(d => d.ClientId)
@@ -401,7 +401,7 @@ public partial class AutoPartsContext
             entity.Property(e => e.Internal).HasDefaultValue(false).HasColumnName("internal");
             entity.Property(e => e.Body).HasMaxLength(LongText).HasColumnName("body");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
 
             entity.HasOne(d => d.Ticket).WithMany(p => p.Messages)
                 .HasForeignKey(d => d.TicketId)
@@ -433,7 +433,7 @@ public partial class AutoPartsContext
             entity.Property(e => e.RejectedStored).HasDefaultValue(0).HasColumnName("rejectedStored");
             entity.Property(e => e.Error).HasMaxLength(LongText).HasColumnName("error");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP").HasPrecision(3).HasColumnName("createdAt");
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
 
             // The log outlives the list. Deleting a price list must not delete
             // the record of what loading it did.

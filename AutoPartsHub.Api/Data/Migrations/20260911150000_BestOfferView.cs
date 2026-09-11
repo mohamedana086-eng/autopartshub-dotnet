@@ -24,7 +24,7 @@ namespace AutoPartsHub.Api.Data.Migrations
     /// that rewrite is exact rather than approximate.
     /// </remarks>
     [DbContext(typeof(AutoPartsContext))]
-    [Migration("20260910110000_BestOfferView")]
+    [Migration("20260911150000_BestOfferView")]
     public partial class BestOfferView : Migration
     {
         /// <inheritdoc />

@@ -14,22 +14,10 @@ namespace AutoPartsHub.Tests.SqlServer;
 /// reading the model, and none would have been caught by a test that did not
 /// connect.
 /// </remarks>
-public class SchemaTests : IAsyncLifetime
+[Collection(CatalogueCollection.Name)]
+public class SchemaTests(Catalogue catalogue)
 {
-    private AutoPartsContext _db = null!;
-
-    public Task InitializeAsync()
-    {
-        if (SqlServer.Unavailable is not null) return Task.CompletedTask;
-
-        _db = new AutoPartsContext(new DbContextOptionsBuilder<AutoPartsContext>()
-            .UseSqlServer(SqlServer.ConnectionString)
-            .Options);
-
-        return Task.CompletedTask;
-    }
-
-    public Task DisposeAsync() => _db?.DisposeAsync().AsTask() ?? Task.CompletedTask;
+    private AutoPartsContext _db => catalogue.Db;
 
     [SqlServerFact]
     public async Task TheMigrationsAreAllApplied()
@@ -134,9 +122,42 @@ public class SchemaTests : IAsyncLifetime
     {
         var offers = await _db.BestOffers.ToListAsync();
 
-        // Nothing is seeded, so the answer is empty — the point is that the
-        // view parses, binds and projects the six columns the entity declares.
-        Assert.Empty(offers);
+        // Every column the entity declares comes back populated — which is
+        // more than "the view exists", and less than "it picks the right row".
+        // The second is PortedQueryTests, where the seed is arranged to make a
+        // wrong pick visible.
+        var offer = Assert.Single(offers);
+        Assert.NotEmpty(offer.ProductId);
+        Assert.NotEmpty(offer.SupplierId);
+        Assert.NotEmpty(offer.SupplierCode);
+        Assert.NotEmpty(offer.SupplierName);
+        Assert.True(offer.PurchasePrice > 0);
+    }
+
+    /// <summary>
+    /// One clock, and it is UTC.
+    /// </summary>
+    /// <remarks>
+    /// CURRENT_TIMESTAMP is the server's LOCAL time in SQL Server and
+    /// SYSUTCDATETIME is UTC. Both were writing the same columns after the
+    /// port — three hours apart on the machine that found it, which showed up
+    /// as a row whose lastSeenAt was earlier than its firstSeenAt.
+    ///
+    /// Asserted against the defaults the migration actually created rather than
+    /// against the model, because the model is not what stamps the row.
+    /// </remarks>
+    [SqlServerFact]
+    public async Task EveryTimestampDefaultIsUtc()
+    {
+        var local = await _db.Database.SqlQuery<string>($"""
+            SELECT t.name + '.' + c.name + ' = ' + d.definition AS "Value"
+            FROM sys.default_constraints d
+            JOIN sys.columns c ON c.object_id = d.parent_object_id AND c.column_id = d.parent_column_id
+            JOIN sys.tables t ON t.object_id = d.parent_object_id
+            WHERE d.definition LIKE '%getdate%' OR d.definition LIKE '%CURRENT_TIMESTAMP%'
+            """).ToListAsync();
+
+        Assert.True(local.Count == 0, $"stamped in local time: {string.Join(", ", local)}");
     }
 
     /// <remarks>

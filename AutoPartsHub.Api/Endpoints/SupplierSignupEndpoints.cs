@@ -288,7 +288,7 @@ public static class SupplierSignupEndpoints
                 await db.Database.ExecuteSqlAsync($"""
                     UPDATE "Supplier"
                        SET "active" = 1,
-                           "approvedAt" = COALESCE("approvedAt", CURRENT_TIMESTAMP)
+                           "approvedAt" = COALESCE("approvedAt", SYSUTCDATETIME())
                      WHERE "id" = {id}
                     """, ct);
             }

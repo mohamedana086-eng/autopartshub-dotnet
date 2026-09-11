@@ -90,7 +90,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.UpdatedAt)
@@ -114,7 +114,7 @@ public partial class AutoPartsContext : DbContext
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AddedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("addedAt");
             entity.Property(e => e.CartId).HasColumnName("cartId");
@@ -150,7 +150,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.CategoryId).HasColumnName("categoryId");
             entity.Property(e => e.City).HasColumnName("city");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.CurrencyId).HasColumnName("currencyId");
@@ -315,7 +315,7 @@ public partial class AutoPartsContext : DbContext
                 .HasDefaultValue(true)
                 .HasColumnName("active");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Label).HasColumnName("label");
@@ -376,7 +376,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Body).HasColumnName("body");
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Link).HasColumnName("link");
@@ -404,7 +404,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.CurrencyCode)
@@ -487,7 +487,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Active).HasColumnName("active");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Description).HasColumnName("description");
@@ -539,7 +539,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.BasePrice).HasColumnName("basePrice");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Currency)
@@ -583,7 +583,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Alt).HasColumnName("alt");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.ProductId).HasColumnName("productId");
@@ -613,7 +613,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.City).HasColumnName("city");
             entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Name).HasColumnName("name");
@@ -797,7 +797,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.ClientId).HasColumnName("clientId");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.ExpiresAt)
@@ -830,7 +830,7 @@ public partial class AutoPartsContext : DbContext
             entity.Property(e => e.City).HasColumnName("city");
             entity.Property(e => e.Code).HasColumnName("code");
             entity.Property(e => e.CreatedAt)
-                .HasDefaultValueSql("CURRENT_TIMESTAMP")
+                .HasDefaultValueSql("SYSUTCDATETIME()")
                 .HasPrecision(3)
                 .HasColumnName("createdAt");
             entity.Property(e => e.Name).HasColumnName("name");
