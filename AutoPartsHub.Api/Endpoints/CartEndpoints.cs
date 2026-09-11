@@ -168,13 +168,19 @@ public static class CartEndpoints
 
         return new
         {
-            // Timestamps.Iso, not ToUniversalTime: the column is TIMESTAMP
-            // without a zone, so Npgsql hands it back with Kind=Unspecified,
-            // and ToUniversalTime reads Unspecified as local and shifts it by
+            // Timestamps.Iso, not ToUniversalTime: the column carries no zone,
+            // so the driver hands it back with Kind=Unspecified — datetime2
+            // through SqlClient exactly as TIMESTAMP did through Npgsql — and
+            // ToUniversalTime reads Unspecified as local and shifts it by
             // whatever the machine's offset happens to be. The value stored is
             // already UTC. This read three hours early on my machine and would
             // have read correctly on a server set to UTC — right where nobody
             // is looking, wrong everywhere else.
+            //
+            // The same three hours turned up again during the move, in the
+            // schema defaults: CURRENT_TIMESTAMP is local time to SQL Server.
+            // Every timestamp here is UTC and nothing may quietly assume
+            // otherwise.
             updatedAt = Timestamps.Iso(updatedAt),
             items = lines.Select(line => new
             {

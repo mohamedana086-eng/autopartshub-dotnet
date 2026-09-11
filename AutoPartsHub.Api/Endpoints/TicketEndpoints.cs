@@ -7,7 +7,6 @@ using AutoPartsHub.Api.Support;
 using AutoPartsHub.Domain.Catalogue;
 using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AutoPartsHub.Api.Endpoints;
 
@@ -32,8 +31,6 @@ namespace AutoPartsHub.Api.Endpoints;
 /// </remarks>
 public static class TicketEndpoints
 {
-    private const string UniqueViolation = "23505";
-
     public static void MapTicketEndpoints(this IEndpointRouteBuilder app)
     {
         /* ------------------------------------------- the customer's own --- */
@@ -452,7 +449,7 @@ public static class TicketEndpoints
                 await transaction.CommitAsync(ct);
                 return id;
             }
-            catch (PostgresException e) when (e.SqlState == UniqueViolation && attempt < 4)
+            catch (Exception e) when (e.Is(DatabaseRefusal.Unique) && attempt < 4)
             {
                 // A reference collision. Try again with a new one.
             }

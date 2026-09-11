@@ -71,18 +71,53 @@ public static class ConnectionString
     /// </remarks>
     public static DatabaseProvider ProviderFor(string? configured, string connectionString)
     {
-        if (!string.IsNullOrWhiteSpace(configured))
+        var looksLike = Sniff(connectionString);
+
+        if (string.IsNullOrWhiteSpace(configured))
         {
-            return configured.Trim().ToLowerInvariant() switch
-            {
-                "sqlserver" or "mssql" => DatabaseProvider.SqlServer,
-                "postgres" or "postgresql" or "npgsql" => DatabaseProvider.PostgreSql,
-                _ => throw new InvalidOperationException(
-                    $"DATABASE_PROVIDER is \"{configured}\", which is not a provider this "
-                    + "application has. Use sqlserver or postgres."),
-            };
+            return looksLike ?? throw new InvalidOperationException(
+                "Could not tell which database this connection string is for. Set "
+                + "DATABASE_PROVIDER to sqlserver or postgres.");
         }
 
+        var chosen = configured.Trim().ToLowerInvariant() switch
+        {
+            "sqlserver" or "mssql" => DatabaseProvider.SqlServer,
+            "postgres" or "postgresql" or "npgsql" => DatabaseProvider.PostgreSql,
+            _ => throw new InvalidOperationException(
+                $"DATABASE_PROVIDER is \"{configured}\", which is not a provider this "
+                + "application has. Use sqlserver or postgres."),
+        };
+
+        // A setting that disagrees with the string it is applied to.
+        //
+        // Refused here rather than left to the provider, because the provider's
+        // answer is not a useful one: handing SQL Server a `Host=…;Database=…`
+        // reports a keyword it does not recognise, which reads as a typo in the
+        // connection string rather than as the wrong engine being selected.
+        // Half a deployment is configured for the move and half is not, and
+        // that is the sentence worth printing.
+        if (looksLike is { } evident && evident != chosen)
+        {
+            throw new InvalidOperationException(
+                $"DATABASE_PROVIDER says {chosen}, but the connection string is for {evident}. "
+                + "One of the two is left over from before the move.");
+        }
+
+        return chosen;
+    }
+
+    /// <summary>
+    /// Which engine a connection string looks like, or null when it is not
+    /// one of the two unambiguous shapes.
+    /// </summary>
+    /// <remarks>
+    /// `Server=` is deliberately not here: Npgsql accepts it as an alias for
+    /// `Host=` and SQL Server uses it as its own, so a string carrying it is
+    /// genuinely ambiguous and DATABASE_PROVIDER has to say.
+    /// </remarks>
+    private static DatabaseProvider? Sniff(string connectionString)
+    {
         if (connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
             || connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase)
             || connectionString.Contains("Host=", StringComparison.OrdinalIgnoreCase))
@@ -97,9 +132,7 @@ public static class ConnectionString
             return DatabaseProvider.SqlServer;
         }
 
-        throw new InvalidOperationException(
-            "Could not tell which database this connection string is for. Set "
-            + "DATABASE_PROVIDER to sqlserver or postgres.");
+        return null;
     }
 
     /// <summary>Turns a postgres URL into Npgsql's key/value form. Anything

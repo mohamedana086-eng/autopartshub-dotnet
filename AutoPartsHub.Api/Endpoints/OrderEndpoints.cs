@@ -6,7 +6,6 @@ using AutoPartsHub.Api.Pricing;
 using AutoPartsHub.Domain.Catalogue;
 using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AutoPartsHub.Api.Endpoints;
 
@@ -356,7 +355,7 @@ public static class OrderEndpoints
                 await transaction.RollbackAsync(ct);
                 throw;
             }
-            catch (PostgresException e) when (e.SqlState == "23505" && attempt < 4)
+            catch (Exception e) when (e.Is(DatabaseRefusal.Unique) && attempt < 4)
             {
                 await transaction.RollbackAsync(ct);
             }

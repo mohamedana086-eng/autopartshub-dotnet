@@ -5,7 +5,6 @@ using AutoPartsHub.Api.Inventory;
 using AutoPartsHub.Api.Mail;
 using AutoPartsHub.Domain.Orders;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AutoPartsHub.Api.Endpoints;
 
@@ -136,7 +135,7 @@ public static class AdminOrderWriteEndpoints
 
                 await transaction.CommitAsync(ct);
             }
-            catch (PostgresException e) when (e.SqlState == CheckViolation)
+            catch (Exception e) when (e.Is(DatabaseRefusal.Check))
             {
                 // The CHECK on StockLevel refusing a negative count: the
                 // shelves and the orders holding them disagree, so releasing
@@ -201,7 +200,6 @@ public static class AdminOrderWriteEndpoints
         });
     }
 
-    private const string CheckViolation = "23514";
 }
 
 /// <summary>An order's status columns, as the update hands them back.</summary>

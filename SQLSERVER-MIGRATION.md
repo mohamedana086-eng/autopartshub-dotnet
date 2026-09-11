@@ -144,30 +144,55 @@ The largest concentrations are `AdminReferenceEndpoints.cs` (13),
 `AdminSiteWriteEndpoints.cs` (10), `AdminPriceListWriteEndpoints.cs` (9),
 `AdminDeskEndpoints.cs` (9) and `Admin/MarkupRules.cs` (9).
 
-### 3. What the check cannot tell you
+### 3. ~~What the check cannot tell you~~ — done
 
 `NOEXEC` checks shape and names. It does not check meaning: a `LIMIT` rewritten
 to a `TOP` that lost its `ORDER BY` parses perfectly and returns different
-rows. Seeded data and assertions on results are the only thing that catches
-that, which is T-003 and T-025.
+rows.
 
-### 4. What has not been touched
+`AutoPartsHub.Tests/SqlServer` now seeds a small catalogue whose numbers are
+chosen to make a wrong answer visible rather than plausible — the preferred
+supplier is the dearer of the two live ones, and the stopped supplier's offer
+is both the cheapest and the highest priority. Twelve tests cover the rewrites
+where being wrong would be invisible.
 
-The dialect check reads statements; it does not run the application. Two
-things it cannot see are still PostgreSQL-shaped:
+One of them found a real bug. `CURRENT_TIMESTAMP` is the server's LOCAL time in
+SQL Server and `SYSUTCDATETIME` is UTC; translating `now()` and leaving the
+schema defaults alone put both into the same columns, three hours apart, so a
+row came back with a `lastSeenAt` earlier than its `firstSeenAt`. Thirty-one
+sites now say UTC and a test reads the defaults the migration created.
 
-- **Exception handling.** `AdminOrderWriteEndpoints` catches
-  `PostgresException` to turn a CHECK violation into a sentence an admin can
-  act on. Against SQL Server that becomes `SqlException` with a different
-  error number, so the catch will not fire and the admin gets a stack trace
-  instead.
-- **`ConnectionString.Normalise`** still builds its output with Npgsql's
-  connection-string builder, which is right for as long as PostgreSQL is the
-  deployed engine and wrong the moment it is not.
+### 4. ~~What has not been touched~~ — done
 
-Neither is a translation: both are decisions about what the application does
-when the database refuses something, and both want a test that makes the
-database refuse it.
+The dialect check reads statements; it does not run the application, so two
+things it could not see were left PostgreSQL-shaped.
+
+**Exception handling.** Three places caught `PostgresException` and did
+something other than let a failed write become a 500: two retry a reference
+collision, one turns a CHECK violation on the shelves into a sentence telling
+an admin to run the reconciliation. Against SQL Server none of them fired —
+the exception is a `SqlException` carrying a number rather than a SQLSTATE.
+That is the worst shape of bug available here, because those paths only run
+when something has already gone wrong and are the least likely to be tried by
+hand before a cutover.
+
+`DatabaseRefusals` classifies both engines' exceptions into what the
+application actually cares about, and the SQL Server numbers are asserted by
+provoking each violation against a real engine rather than cited from a table.
+547 in particular covers both CHECK and FOREIGN KEY and only the message says
+which — reading one as the other would tell an admin to hunt a stock
+discrepancy that does not exist.
+
+**`ConnectionString`.** The note here previously said this file was "wrong the
+moment PostgreSQL is not the deployed engine". Checking it showed that was
+overstated: `Normalise` converts a `postgres://` URL and passes everything
+else through untouched, so a SQL Server string already survived it intact.
+
+The real gap was a different one, and had no test. Nothing noticed when
+`DATABASE_PROVIDER` and the connection string disagreed — half a deployment
+moved and half not — and the provider's own complaint about an unrecognised
+keyword reads as a typo in the string rather than as the wrong engine. That
+now refuses at startup and says which half is left over.
 
 ### 5. The cutover
 
