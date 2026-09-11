@@ -42,13 +42,13 @@ public static class ProductEndpoints
                 LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
-                 AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-                LEFT JOIN LATERAL (
+                 AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+                OUTER APPLY (
                   SELECT SUM(sl."quantity" - sl."reserved") AS "available"
                   FROM "StockLevel" sl
                   JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-                  WHERE sl."productId" = p."id" AND w."active" = 1 = 1
-                ) st ON 1 = 1
+                  WHERE sl."productId" = p."id" AND w."active" = 1
+                ) st
                 WHERE p."id" = {id}
                 -- A switched-off supplier's parts are out of the catalogue, so
                 -- this reads as "no such part" rather than showing a page

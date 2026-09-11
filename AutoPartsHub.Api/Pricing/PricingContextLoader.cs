@@ -29,7 +29,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         var categoryId = session?.CategoryId;
 
         var account = (await db.Database.SqlQuery<AccountRow>($"""
-            SELECT c."discountPercent" AS "DiscountPercent",
+            SELECT TOP 1 c."discountPercent" AS "DiscountPercent",
                    -- Who is asking, for the dimensions that describe the caller
                    -- rather than the part.
                    c."id" AS "ClientId", c."role" AS "ClientRole",
@@ -50,7 +50,6 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    OR ({categoryId} IS NULL AND cat."name" = 'Retail')
             LEFT JOIN "Currency" cur ON cur."id" = c."currencyId" AND cur."active" = 1
             LEFT JOIN "Currency" base ON base."isBase"
-            LIMIT 1
             """).ToListAsync(ct)).FirstOrDefault();
 
         // Ordered by id, because the engine sorts by specificity then priority
@@ -78,7 +77,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    (EXTRACT(EPOCH FROM "endsAt" AT TIME ZONE 'UTC') * 1000)::bigint
                      AS "EndsAtMs"
             FROM "MarkupRule"
-            WHERE "active"
+            WHERE "active" = 1
             ORDER BY "id" ASC
             """).ToListAsync(ct);
 
@@ -122,8 +121,8 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         // rung of the purchase-side chain, and the name is what a quote says
         // when that rung decides the price.
         var activeList = (await db.Database.SqlQuery<ActiveListRow>($"""
-            SELECT "id" AS "Id", "name" AS "Name", "markupPercent" AS "MarkupPercent"
-            FROM "PriceList" WHERE "active" LIMIT 1
+            SELECT TOP 1 "id" AS "Id", "name" AS "Name", "markupPercent" AS "MarkupPercent"
+            FROM "PriceList" WHERE "active" = 1
             """).ToListAsync(ct)).FirstOrDefault();
 
         // The suppliers that state a margin, as a lookup for the same reason
@@ -156,7 +155,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    "markupType" AS "MarkupType", "markupValue" AS "MarkupValue",
                    "markupMinAmount" AS "MarkupMinAmount"
             FROM "GoodsCategory"
-            WHERE "active" AND "markupType" IS NOT NULL AND "markupValue" IS NOT NULL
+            WHERE "active" = 1 AND "markupType" IS NOT NULL AND "markupValue" IS NOT NULL
             """).ToListAsync(ct);
 
         var goodsCategoryMarkups = categoryRows.ToDictionary(

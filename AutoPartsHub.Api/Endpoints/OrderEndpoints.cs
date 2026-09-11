@@ -157,7 +157,7 @@ public static class OrderEndpoints
                 LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
-                 AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
+                 AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
                 WHERE p."id" = ANY({ids}::text[])
                 -- A switched-off supplier's part is not orderable. Dropping it
                 -- here rather than refusing separately is deliberate: the

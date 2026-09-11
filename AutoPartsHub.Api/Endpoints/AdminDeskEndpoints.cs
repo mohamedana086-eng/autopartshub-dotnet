@@ -47,7 +47,7 @@ public static class AdminDeskEndpoints
                           JOIN "Client" c ON c."id" = o."clientId"
                          WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
                        ) AS "Orders",
-                       (SELECT COUNT(*) FROM "MarkupRule" WHERE "active") AS "ActiveRules"
+                       (SELECT COUNT(*) FROM "MarkupRule" WHERE "active" = 1) AS "ActiveRules"
                 """).ToListAsync(ct)).Single();
 
             return Results.Ok(new
@@ -177,7 +177,7 @@ public static class AdminDeskEndpoints
                   CASE WHEN {byRecent} THEN "lastSeenAt" END DESC,
                   CASE WHEN {byRecent} THEN NULL ELSE "searches" END DESC,
                   "term" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>(
@@ -245,7 +245,7 @@ public static class AdminDeskEndpoints
                   AND ({f.From} IS NULL OR o."createdAt" >= {f.From})
                   AND ({f.Before} IS NULL OR o."createdAt" < {f.Before})
                 ORDER BY o."createdAt" DESC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
@@ -372,7 +372,7 @@ public static class AdminDeskEndpoints
                        lines."units" AS "Units", lines."cost" AS "Cost"
                 FROM "Cart" ct
                 JOIN "Client" cl ON cl."id" = ct."clientId"
-                JOIN LATERAL (
+                CROSS APPLY (
                   SELECT SUM(ci."quantity") AS "units",
                          -- The active price list where it covers the part, the
                          -- best supplier offer where it does not, the part's
@@ -387,19 +387,18 @@ public static class AdminDeskEndpoints
                   FROM "CartItem" ci
                   JOIN "Product" p ON p."id" = ci."productId"
                   LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
-                  LEFT JOIN LATERAL (
-                    SELECT i."price"
+                  OUTER APPLY (
+                    SELECT TOP 1 i."price"
                     FROM "PriceListItem" i
                     JOIN "PriceList" pl ON pl."id" = i."priceListId" AND pl."active" = 1
                     WHERE i."productId" = p."id"
-                    LIMIT 1
-                  ) pli ON 1 = 1
+                  ) pli
                   WHERE ci."cartId" = ct."id"
-                ) lines ON 1 = 1
+                ) lines
                 WHERE lines."units" IS NOT NULL
                   AND ({scope} IS NULL OR cl."salesManagerId" = {scope})
                 ORDER BY ct."updatedAt" ASC
-                LIMIT {CartLimit}
+                OFFSET 0 ROWS FETCH NEXT {CartLimit} ROWS ONLY
                 """).ToListAsync(ct);
 
             var cartIds = carts.Select(c => c.Id).ToArray();

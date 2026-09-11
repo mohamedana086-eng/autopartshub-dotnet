@@ -69,7 +69,7 @@ public static class StockMovements
                     FROM "StockLevel" s
                     JOIN "Warehouse" w ON w."id" = s."warehouseId"
                     WHERE s."productId" = {need.ProductId}
-                      AND w."active" = 1 = 1
+                      AND w."active" = 1
                     ORDER BY w."priority" DESC, w."code" ASC
                     FOR UPDATE OF s
                     """)

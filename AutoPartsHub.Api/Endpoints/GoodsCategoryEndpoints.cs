@@ -146,10 +146,9 @@ public static class GoodsCategoryEndpoints
         AutoPartsContext db, string slug, string name, string? exceptId, CancellationToken ct)
     {
         var rows = await db.Database.SqlQuery<ClashRow>($"""
-            SELECT "slug" AS "Slug", "name" AS "Name" FROM "GoodsCategory"
+            SELECT TOP 1 "slug" AS "Slug", "name" AS "Name" FROM "GoodsCategory"
             WHERE ("slug" = {slug} OR lower("name") = lower({name}))
               AND ({exceptId} IS NULL OR "id" <> {exceptId})
-            LIMIT 1
             """).ToListAsync(ct);
 
         var row = rows.FirstOrDefault();
@@ -170,13 +169,13 @@ public static class GoodsCategoryEndpoints
                    COALESCE(p."n", 0) AS "ProductCount",
                    COALESCE(r."n", 0) AS "RuleCount"
             FROM "GoodsCategory" g
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS n FROM "Product" WHERE "goodsCategoryId" = g."id"
-            ) p ON 1 = 1
-            LEFT JOIN LATERAL (
+            ) p
+            OUTER APPLY (
               SELECT COUNT(*) AS n FROM "MarkupRuleCondition"
                WHERE "dimension" = 'goodsCategory' AND "value" = g."id"
-            ) r ON 1 = 1
+            ) r
             WHERE ({id} IS NULL OR g."id" = {id})
             ORDER BY g."sortOrder" ASC, g."name" ASC
             """).ToListAsync(ct);

@@ -43,9 +43,9 @@ public static class AdminReferenceEndpoints
                        p."count" AS "ProductCount"
                 FROM "Supplier" s
                 LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "Product" pr WHERE pr."supplierId" = s."id"
-                ) p ON 1 = 1
+                ) p
                 ORDER BY s."name" ASC
                 """).ToListAsync(ct);
 
@@ -72,14 +72,14 @@ public static class AdminReferenceEndpoints
                        COALESCE(s."quantity", 0) AS "TotalQuantity",
                        COALESCE(s."reserved", 0) AS "TotalReserved"
                 FROM "Warehouse" w
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "RetailOutlet" ro WHERE ro."warehouseId" = w."id"
-                ) o ON 1 = 1
-                LEFT JOIN LATERAL (
+                ) o
+                OUTER APPLY (
                   SELECT COUNT(*) AS "skus", SUM(sl."quantity") AS "quantity",
                          SUM(sl."reserved") AS "reserved"
                   FROM "StockLevel" sl WHERE sl."warehouseId" = w."id"
-                ) s ON 1 = 1
+                ) s
                 ORDER BY w."priority" DESC, w."code" ASC
                 """).ToListAsync(ct);
 
@@ -129,9 +129,9 @@ public static class AdminReferenceEndpoints
                        c."rate" AS "Rate", c."isBase" AS "IsBase", c."active" AS "Active",
                        n."count" AS "ClientCount"
                 FROM "Currency" c
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."currencyId" = c."id"
-                ) n ON 1 = 1
+                ) n
                 ORDER BY c."isBase" DESC, c."code" ASC
                 """).ToListAsync(ct);
 
@@ -151,9 +151,9 @@ public static class AdminReferenceEndpoints
                        c."minOrderAmount" AS "MinOrderAmount", c."shelfLifeDays" AS "ShelfLifeDays",
                        n."count" AS "ClientCount"
                 FROM "ClientCategory" c
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."categoryId" = c."id"
-                ) n ON 1 = 1
+                ) n
                 ORDER BY c."markupPercent" ASC
                 """).ToListAsync(ct);
 
@@ -258,7 +258,7 @@ public static class AdminReferenceEndpoints
                 FROM "PriceListImportRow"
                 WHERE "importId" = {importId}
                 ORDER BY "line" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
@@ -313,7 +313,7 @@ public static class AdminReferenceEndpoints
                 JOIN "Product" p ON p."id" = i."productId"
                 WHERE i."priceListId" = {id}
                 ORDER BY p."partNumber" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
@@ -394,9 +394,9 @@ public static class AdminReferenceEndpoints
                    n."count" AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "PriceListItem" i WHERE i."priceListId" = l."id"
-            ) n ON 1 = 1
+            ) n
             WHERE ({id} IS NULL OR l."id" = {id})
             ORDER BY l."active" DESC, l."createdAt" DESC
             """).ToListAsync(ct);
@@ -440,7 +440,7 @@ public static class AdminReferenceEndpoints
             WHERE ({id} IS NULL OR i."id" = {id})
               AND ({priceListId} IS NULL OR i."priceListId" = {priceListId})
             ORDER BY i."createdAt" DESC
-            LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+            OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
             """).ToListAsync(ct);
 
         var total = (await db.Database.SqlQuery<int>($"""

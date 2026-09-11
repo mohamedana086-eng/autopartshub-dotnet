@@ -207,7 +207,7 @@ public static class TicketEndpoints
                 WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
                   AND ({status} IS NULL OR t."status" = {status})
                 ORDER BY t."lastMessageAt" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""

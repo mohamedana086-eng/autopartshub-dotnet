@@ -59,15 +59,15 @@ public static class AdminCatalogueWriteEndpoints
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
                 LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
                 LEFT JOIN "GoodsCategory" g ON g."id" = p."goodsCategoryId"
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT pi."url" FROM "ProductImage" pi
-                  WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
-                ) img ON 1 = 1
-                LEFT JOIN LATERAL (
+                  WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+                ) img
+                OUTER APPLY (
                   SELECT SUM(sl."quantity") AS "stockOnHand",
                          SUM(sl."quantity" - sl."reserved") AS "stockAvailable"
                   FROM "StockLevel" sl WHERE sl."productId" = p."id"
-                ) st ON 1 = 1
+                ) st
                 -- Brand and system are searched deliberately: an admin typing
                 -- "brembo" means the brand, and leaving it out made the filter
                 -- answer nothing for it while the storefront found the parts.
@@ -77,7 +77,7 @@ public static class AdminCatalogueWriteEndpoints
                    OR m."name" LIKE {term}
                    OR v."name" LIKE {term})
                 ORDER BY v."order" ASC, p."partNumber" ASC
-                LIMIT 300
+                OFFSET 0 ROWS FETCH NEXT 300 ROWS ONLY
                 """).ToListAsync(ct);
 
             var manufacturers = await db.Manufacturers.OrderBy(m => m.Name)
@@ -100,7 +100,7 @@ public static class AdminCatalogueWriteEndpoints
             // filing a new part into a category the shop has retired.
             var goodsCategories = await db.Database.SqlQuery<NamedRow>($"""
                 SELECT "id" AS "Id", "name" AS "Name" FROM "GoodsCategory"
-                WHERE "active" ORDER BY "sortOrder" ASC, "name" ASC
+                WHERE "active" = 1 ORDER BY "sortOrder" ASC, "name" ASC
                 """).ToListAsync(ct);
 
             return Results.Ok(new { products, manufacturers, systems, suppliers, warehouses,
@@ -389,15 +389,15 @@ public static class AdminCatalogueWriteEndpoints
             JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
             LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
             LEFT JOIN "GoodsCategory" g ON g."id" = p."goodsCategoryId"
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT pi."url" FROM "ProductImage" pi
-              WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
-            ) img ON 1 = 1
-            LEFT JOIN LATERAL (
+              WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            ) img
+            OUTER APPLY (
               SELECT SUM(sl."quantity") AS "stockOnHand",
                      SUM(sl."quantity" - sl."reserved") AS "stockAvailable"
               FROM "StockLevel" sl WHERE sl."productId" = p."id"
-            ) st ON 1 = 1
+            ) st
             WHERE p."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

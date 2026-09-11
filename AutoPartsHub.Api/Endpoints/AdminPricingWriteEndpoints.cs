@@ -369,9 +369,9 @@ public static class AdminPricingWriteEndpoints
                    c."rate" AS "Rate", c."isBase" AS "IsBase", c."active" AS "Active",
                    n."count" AS "ClientCount"
             FROM "Currency" c
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."currencyId" = c."id"
-            ) n ON 1 = 1
+            ) n
             WHERE c."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

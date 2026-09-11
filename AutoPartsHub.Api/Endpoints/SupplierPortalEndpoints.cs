@@ -126,7 +126,7 @@ public static class SupplierPortalEndpoints
                 JOIN "Order" o ON o."id" = i."orderId"
                 WHERE p."supplierId" = {supplierId}
                 ORDER BY o."createdAt" DESC, p."partNumber" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""

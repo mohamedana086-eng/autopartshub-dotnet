@@ -540,9 +540,9 @@ public static class AdminPriceListWriteEndpoints
                    n."count" AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "PriceListItem" i WHERE i."priceListId" = l."id"
-            ) n ON 1 = 1
+            ) n
             WHERE l."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

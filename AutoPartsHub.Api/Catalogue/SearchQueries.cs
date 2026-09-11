@@ -73,7 +73,7 @@ public sealed class SearchQueries(AutoPartsContext db)
         var partType = rows.PartType is { Length: > 0 } chosen ? chosen : null;
 
         var counted = await db.Database.SqlQuery<CountedSearchRow>($"""
-            SELECT COUNT(*) OVER ()  AS "Total",
+            SELECT TOP {limit} COUNT(*) OVER ()  AS "Total",
                    p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                    p."description" AS "Description", p."stockDays" AS "StockDays",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
@@ -105,20 +105,20 @@ public sealed class SearchQueries(AutoPartsContext db)
             LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
-             AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-            LEFT JOIN LATERAL (
+             AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+            OUTER APPLY (
               SELECT pi."url", pi."alt"
               FROM "ProductImage" pi
               WHERE pi."productId" = p."id"
               ORDER BY pi."sortOrder" ASC
-              LIMIT 1
-            ) img ON 1 = 1
-            LEFT JOIN LATERAL (
+              OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            ) img
+            OUTER APPLY (
               SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = 1 = 1
-            ) st ON 1 = 1
+              WHERE sl."productId" = p."id" AND w."active" = 1
+            ) st
             WHERE (
               -- No query: everything is reachable, and the filters below do the work.
               ({hasQuery} IS NULL OR {hasQuery} = 0)
@@ -185,7 +185,6 @@ public sealed class SearchQueries(AutoPartsContext db)
             -- handled where it arises.
             AND (({returnsOnly} IS NULL OR {returnsOnly} = 0) OR (s."acceptsReturns" = 1))
             AND ({partType}::text[] IS NULL OR p."partType" = ANY({partType}::text[]))
-            LIMIT {limit}
             """).ToListAsync(ct);
 
         return new SearchPage(
@@ -343,20 +342,20 @@ public sealed class SearchQueries(AutoPartsContext db)
             LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
-             AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-            LEFT JOIN LATERAL (
+             AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+            OUTER APPLY (
               SELECT pi."url", pi."alt"
               FROM "ProductImage" pi
               WHERE pi."productId" = p."id"
               ORDER BY pi."sortOrder" ASC
-              LIMIT 1
-            ) img ON 1 = 1
-            LEFT JOIN LATERAL (
+              OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            ) img
+            OUTER APPLY (
               SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = 1 = 1
-            ) st ON 1 = 1
+              WHERE sl."productId" = p."id" AND w."active" = 1
+            ) st
             WHERE p."id" = ANY({array}::text[])
             AND ({variant} IS NULL OR EXISTS (
               SELECT 1 FROM "Fitment" fit
@@ -466,7 +465,7 @@ public sealed class SearchQueries(AutoPartsContext db)
             -- ranked search already breaks ties this way; the fuzzy fallback
             -- was missed.
             ORDER BY score DESC, p."name" ASC, p."partNumber" ASC
-            LIMIT 25
+            OFFSET 0 ROWS FETCH NEXT 25 ROWS ONLY
             """).ToListAsync(ct);
     }
 

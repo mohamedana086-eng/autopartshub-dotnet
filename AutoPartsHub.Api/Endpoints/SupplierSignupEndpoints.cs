@@ -209,17 +209,17 @@ public static class SupplierSignupEndpoints
                        c."name" AS "ContactName", c."email" AS "ContactEmail",
                        to_char(c."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "SignedUpAt"
                 FROM "Supplier" s
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "Product" p WHERE p."supplierId" = s."id"
-                ) n ON 1 = 1
-                LEFT JOIN LATERAL (
+                ) n
+                OUTER APPLY (
                   SELECT cl."name", cl."email", cl."createdAt"
                   FROM "Client" cl
                   WHERE cl."supplierId" = s."id"
                   ORDER BY cl."createdAt" ASC
-                  LIMIT 1
-                ) c ON 1 = 1
-                WHERE s."active" = 1 = 0 AND s."approvedAt" IS NULL
+                  OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+                ) c
+                WHERE s."active" = 0 AND s."approvedAt" IS NULL
                 ORDER BY c."createdAt" ASC NULLS LAST, s."name" ASC
                 """).ToListAsync(ct);
 

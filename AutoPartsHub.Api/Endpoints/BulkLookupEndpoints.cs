@@ -95,13 +95,13 @@ public static class BulkLookupEndpoints
                 LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
-                 AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-                LEFT JOIN LATERAL (
+                 AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+                OUTER APPLY (
                   SELECT SUM(sl."quantity" - sl."reserved") AS "available"
                   FROM "StockLevel" sl
                   JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-                  WHERE sl."productId" = p."id" AND w."active" = 1 = 1
-                ) st ON 1 = 1
+                  WHERE sl."productId" = p."id" AND w."active" = 1
+                ) st
                 WHERE p."id" = ANY({ids}::text[])
                 -- Same rule as search and the detail page: a switched-off
                 -- supplier's parts are not in the catalogue, so a pasted list

@@ -184,7 +184,7 @@ public sealed class VehicleFinder(AutoPartsContext db)
               AND ({engine} IS NULL OR COALESCE(vv."engineCode", vv."name") = {engine})
             -- Ordered so the same search reads the same twice running.
             ORDER BY mk."name" ASC, mo."name" ASC, vv."yearFrom" ASC, vv."name" ASC, vv."id" ASC
-            LIMIT {limit}
+            OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY
             """).ToListAsync(ct);
 
         return new FinderPage(

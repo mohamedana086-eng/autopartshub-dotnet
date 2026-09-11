@@ -72,7 +72,17 @@ const lineAt = (text, index) => 1 + (text.slice(0, index).match(/\n/g)?.length ?
 function parameterise(sql) {
   // Nested braces do not occur in these strings; interpolations are simple
   // expressions. `{{` is an escaped brace and is left alone.
-  const text = sql.replace(/(?<!\{)\{([^{}]+)\}/g, 'NULL');
+  let text = sql.replace(/(?<!\{)\{([^{}]+)\}/g, 'NULL');
+
+  // Except in a row count, where NULL is not merely untyped but invalid:
+  // SQL Server rejects `FETCH NEXT NULL ROWS` outright, and a page size is
+  // always an integer anyway. Reported as six failures until this existed,
+  // none of which said anything about the statement.
+  text = text
+    .replace(/\bTOP\s+NULL\b/g, 'TOP 1')
+    .replace(/\bOFFSET\s+NULL\b/g, 'OFFSET 0')
+    .replace(/\bFETCH\s+NEXT\s+NULL\b/g, 'FETCH NEXT 1');
+
   return { text, names: [] };
 }
 

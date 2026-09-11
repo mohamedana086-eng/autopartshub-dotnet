@@ -63,7 +63,7 @@ public sealed class BarcodeQueries(AutoPartsContext db)
     public async Task<string?> ProductIdByCodeAsync(string code, CancellationToken ct = default)
     {
         var rows = await db.Database.SqlQuery<string>($"""
-            SELECT "productId" AS "Value" FROM "ProductBarcode" WHERE "code" = {code} LIMIT 1
+            SELECT TOP 1 "productId" AS "Value" FROM "ProductBarcode" WHERE "code" = {code}
             """).ToListAsync(ct);
         return rows.FirstOrDefault();
     }

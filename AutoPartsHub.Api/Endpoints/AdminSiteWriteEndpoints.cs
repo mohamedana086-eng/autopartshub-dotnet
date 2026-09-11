@@ -379,11 +379,10 @@ public static class AdminSiteWriteEndpoints
     private static async Task<SupplierClash?> Clash(
         AutoPartsContext db, string code, string slug, string? exceptId, CancellationToken ct) =>
         (await db.Database.SqlQuery<SupplierClash>($"""
-            SELECT "id" AS "Id", "name" AS "Name", "code" AS "Code"
+            SELECT TOP 1 "id" AS "Id", "name" AS "Name", "code" AS "Code"
             FROM "Supplier"
             WHERE ("code" = {code} OR "slug" = {slug})
               AND ({exceptId} IS NULL OR "id" <> {exceptId})
-            LIMIT 1
             """).ToListAsync(ct)).FirstOrDefault();
 
     private static string ClashMessage(SupplierClash clash, SupplierInput s) =>
@@ -407,9 +406,9 @@ public static class AdminSiteWriteEndpoints
                    p."count" AS "ProductCount"
             FROM "Supplier" s
             LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "Product" pr WHERE pr."supplierId" = s."id"
-            ) p ON 1 = 1
+            ) p
             WHERE s."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 
@@ -423,14 +422,14 @@ public static class AdminSiteWriteEndpoints
                    COALESCE(s."quantity", 0) AS "TotalQuantity",
                    COALESCE(s."reserved", 0) AS "TotalReserved"
             FROM "Warehouse" w
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "RetailOutlet" ro WHERE ro."warehouseId" = w."id"
-            ) o ON 1 = 1
-            LEFT JOIN LATERAL (
+            ) o
+            OUTER APPLY (
               SELECT COUNT(*) AS "skus", SUM(sl."quantity") AS "quantity",
                      SUM(sl."reserved") AS "reserved"
               FROM "StockLevel" sl WHERE sl."warehouseId" = w."id"
-            ) s ON 1 = 1
+            ) s
             WHERE w."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 
