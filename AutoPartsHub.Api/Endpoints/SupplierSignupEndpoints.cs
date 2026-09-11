@@ -220,7 +220,17 @@ public static class SupplierSignupEndpoints
                   OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
                 ) c
                 WHERE s."active" = 0 AND s."approvedAt" IS NULL
-                ORDER BY c."createdAt" ASC NULLS LAST, s."name" ASC
+                -- Longest-waiting applicant first, and the ones with no
+                -- contact account at all at the end.
+                --
+                -- PostgreSQL says that as NULLS LAST. SQL Server has no such
+                -- clause and its default is the opposite of what is wanted —
+                -- nulls sort FIRST under ASC — so a supplier with no account
+                -- would otherwise head the approval queue, which is exactly
+                -- the row an admin can do least with. The CASE puts them last
+                -- explicitly.
+                ORDER BY CASE WHEN c."createdAt" IS NULL THEN 1 ELSE 0 END,
+                         c."createdAt" ASC, s."name" ASC
                 """).ToListAsync(ct);
 
             return Results.Ok(new { suppliers });

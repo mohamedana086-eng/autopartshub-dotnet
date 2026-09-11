@@ -194,11 +194,16 @@ public class TicketTests
         var code = EndpointCode();
         var customer = code[code.IndexOf("CustomerThreadAsync(\n", StringComparison.Ordinal)..];
 
-        Assert.Contains("NOT \"internal\"", code);
+        // `"internal" = 0`, which is how the exclusion is spelled since the
+        // move to SQL Server — T-SQL has no boolean type, so `NOT "internal"`
+        // is not a condition there. The rule being asserted is unchanged: the
+        // note never leaves the database, rather than being filtered out of a
+        // list that already holds it.
+        Assert.Contains("\"internal\" = 0", code);
         // And the customer reader is the one carrying it.
         var reader = code[code.LastIndexOf("private static Task<List<TicketMessageRow>> CustomerThreadAsync",
             StringComparison.Ordinal)..];
-        Assert.Contains("NOT \"internal\"", reader[..reader.IndexOf("StaffThreadAsync", StringComparison.Ordinal)]);
+        Assert.Contains("\"internal\" = 0", reader[..reader.IndexOf("StaffThreadAsync", StringComparison.Ordinal)]);
         Assert.NotEmpty(customer);
     }
 

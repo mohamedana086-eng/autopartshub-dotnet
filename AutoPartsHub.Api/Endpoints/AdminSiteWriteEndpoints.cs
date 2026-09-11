@@ -109,8 +109,8 @@ public static class AdminSiteWriteEndpoints
                 // would make clearing a rating impossible.
                 await db.Database.ExecuteSqlAsync($"""
                     UPDATE "Supplier"
-                       SET "rating" = CASE WHEN {hasRating} THEN {rating} ELSE "rating" END,
-                           "acceptsReturns" = CASE WHEN {hasReturns}
+                       SET "rating" = CASE WHEN {hasRating} = 1 THEN {rating} ELSE "rating" END,
+                           "acceptsReturns" = CASE WHEN {hasReturns} = 1
                                                    THEN {returns}
                                                    ELSE "acceptsReturns" END
                      WHERE "id" = {id}

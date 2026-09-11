@@ -311,7 +311,7 @@ public static class AdminPriceListWriteEndpoints
 
             var written = await db.Database.ExecuteSqlAsync($"""
                 UPDATE "PriceListItem"
-                   SET "markupPercent" = {markup.Value}::double precision
+                   SET "markupPercent" = {markup.Value}
                  WHERE "priceListId" = {id} AND "productId" = {productId}
                 """, ct);
 
@@ -528,16 +528,16 @@ public static class AdminPriceListWriteEndpoints
 
         await db.Database.ExecuteSqlAsync($"""
             UPDATE "PriceList"
-               SET "name" = CASE WHEN {nameSent} THEN {name} ELSE "name" END,
-                   "description" = CASE WHEN {descriptionSent} THEN {description}
+               SET "name" = CASE WHEN {nameSent} = 1 THEN {name} ELSE "name" END,
+                   "description" = CASE WHEN {descriptionSent} = 1 THEN {description}
                                         ELSE "description" END,
-                   "active" = CASE WHEN {active is not null} THEN {active}
+                   "active" = CASE WHEN {active is not null} = 1 THEN {active}
                                    ELSE "active" END,
                    -- Null is a value here rather than an absence: it is how the
                    -- margin is taken away again, so the CASE asks whether the
                    -- field was sent, not whether it holds anything.
-                   "markupPercent" = CASE WHEN {markupSent}
-                                          THEN {markupPercent}::double precision
+                   "markupPercent" = CASE WHEN {markupSent} = 1
+                                          THEN {markupPercent}
                                           ELSE "markupPercent" END,
                    "updatedAt" = CURRENT_TIMESTAMP
              WHERE "id" = {id}

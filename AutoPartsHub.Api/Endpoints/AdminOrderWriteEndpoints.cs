@@ -98,10 +98,10 @@ public static class AdminOrderWriteEndpoints
                            "statusReason" = {to.Reason},
                            "statusChangedAt" = CURRENT_TIMESTAMP,
                            "statusChangedById" = {byId},
-                           "trackingNumber" = CASE WHEN {to.TrackingNumber is not null}
+                           "trackingNumber" = CASE WHEN {to.TrackingNumber is not null} = 1
                                                    THEN {to.TrackingNumber}
                                                    ELSE "trackingNumber" END,
-                           "carrier" = CASE WHEN {to.Carrier is not null}
+                           "carrier" = CASE WHEN {to.Carrier is not null} = 1
                                             THEN {to.Carrier}
                                             ELSE "carrier" END
                     -- PostgreSQL's RETURNING, which sits at the end. SQL

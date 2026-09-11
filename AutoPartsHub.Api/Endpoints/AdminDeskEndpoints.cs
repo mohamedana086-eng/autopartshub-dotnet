@@ -174,8 +174,8 @@ public static class AdminDeskEndpoints
                        "firstSeenAt" AS "FirstSeenAt", "lastSeenAt" AS "LastSeenAt"
                 FROM "SearchMiss"
                 ORDER BY
-                  CASE WHEN {byRecent} THEN "lastSeenAt" END DESC,
-                  CASE WHEN {byRecent} THEN NULL ELSE "searches" END DESC,
+                  CASE WHEN {byRecent} = 1 THEN "lastSeenAt" END DESC,
+                  CASE WHEN {byRecent} = 1 THEN NULL ELSE "searches" END DESC,
                   "term" ASC
                 OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);

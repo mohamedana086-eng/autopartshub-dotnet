@@ -155,8 +155,18 @@ const lineRewrites = {
       // table is the same mistake as `WHERE s."active"`, and requiring the
       // prefix left nine of them behind — found, as usual, by the engine
       // refusing the statement and blaming the line after.
+      //
+      // `"fMake"`, `"fSeries"` and the rest are the vehicle finder's own
+      // per-row answers, which became bits when the conditions that produced
+      // them became CASE expressions. They are read the same way as any other
+      // boolean column and need the same comparison.
+      // ON as well as AND/OR/WHERE. A join condition is a condition like any
+      // other — `LEFT JOIN "Currency" base ON base."isBase"` was the last
+      // statement in the application SQL Server would not accept, and it was
+      // left behind purely because the keyword in front of it was not on this
+      // list.
       .replace(
-        /\b(AND|OR|WHERE)(\s+)((?:[a-z]+\.)?"(?:active|isBase|narrowed|internal|fromStaff|exactMatch|isOEM|acceptsReturns|weightComplete)")(?!\s*(?:=|<>|!=|\bIS\b))/g,
+        /\b(AND|OR|WHERE|ON)(\s+)((?:[a-z]+\.)?"(?:active|isBase|narrowed|internal|fromStaff|exactMatch|isOEM|acceptsReturns|weightComplete|f[A-Z]\w+)")(?!\s*(?:=|<>|!=|\bIS\b))/g,
         '$1$2$3 = 1'
       ),
 
@@ -193,7 +203,62 @@ const lineRewrites = {
       // Bare boolean literals left in VALUES lists and COALESCE, where there
       // is no comparison for the earlier pass to have matched.
       .replace(/(?<![\w'"])TRUE(?![\w'"])/g, '1')
-      .replace(/(?<![\w'"])FALSE(?![\w'"])/g, '0'),
+      .replace(/(?<![\w'"])FALSE(?![\w'"])/g, '0')
+      // A negated bare boolean. `NOT m."internal"` needs the comparison for
+      // the same reason `m."internal"` does, and the earlier rule looked for
+      // AND/OR/WHERE in front — which NOT is not.
+      .replace(
+        /\bNOT\s+((?:[a-z]+\.)?"(?:active|isBase|narrowed|internal|fromStaff|exactMatch|isOEM|acceptsReturns|weightComplete)")/g,
+        '$1 = 0'
+      )
+      // Epoch milliseconds. The columns are already UTC — the schema has no
+      // other kind — so `AT TIME ZONE 'UTC'` was saying so rather than
+      // converting, and DATEDIFF_BIG from the epoch is the whole expression.
+      // _BIG and not DATEDIFF: milliseconds since 1970 passed int in 1994.
+      .replace(
+        /\(EXTRACT\(EPOCH FROM ("[^"]+"|\w+) AT TIME ZONE 'UTC'\) \* 1000\)::bigint/g,
+        (_, column) => `DATEDIFF_BIG(millisecond, '1970-01-01', ${column})`
+      )
+      .replace(/\bEXTRACT\(YEAR FROM ([^)]+\)?)\)/g, (_, e) => `YEAR(${e})`)
+      // The last scalar cast: a parameter Npgsql needed typed.
+      .replace(/::double precision\b(?!\s*\[\])/g, '')
+      // A C# bool interpolated straight into a CASE. PostgreSQL binds it as a
+      // boolean and `CASE WHEN $1 THEN` is a condition; SQL Server binds it as
+      // a bit, which is a value, and a value is not a condition. These are the
+      // "was this field sent" flags on the partial updates, so getting it
+      // wrong means an admin's edit silently writing the wrong column.
+      //
+      // Skipped where a comparison already follows — the vehicle finder
+      // interpolates values, not flags, and `CASE WHEN {make} IS NULL OR …`
+      // is already a condition.
+      .replace(/CASE WHEN (\{[^}]+\})(?!\s*(?:IS\b|=|<|>|!))/g, 'CASE WHEN $1 = 1')
+      // A condition SELECTed as a value. PostgreSQL has a boolean type, so
+      // `(x IS NOT NULL) AS "HasLogin"` is an expression yielding true or
+      // false. T-SQL has no such type: a condition belongs in a WHERE and
+      // nowhere else, and producing one as a column means CASE.
+      //
+      // The result is a bit, which is what the reading side already expects —
+      // these map to C# bool, and SqlClient reads a bit as one.
+      .replace(
+        /\(([^()]*(?:\([^()]*\))?[^()]*?)\)\s+AS\s+("(?:[^"]+)")/g,
+        (whole, expr, alias) => {
+          // A scalar subquery is also a parenthesised expression containing a
+          // comparison — `(SELECT COUNT(*) … WHERE a = b) AS "Count"` — and
+          // wrapping one in CASE WHEN destroys it while leaving the brackets
+          // balanced, so neither guard notices. Five statements went that way
+          // before this line existed. A condition never contains SELECT.
+          if (/\bSELECT\b/i.test(expr)) return whole;
+
+          // No \b around the operators. They are not word characters, so a
+          // boundary before `=` needs a word character immediately before it
+          // and ` = ` has a space — the same mistake that let the bare-boolean
+          // rule append to its own output, made again here and caught by one
+          // statement quietly not being rewritten.
+          return /IS\s+(?:NOT\s+)?NULL|<=|>=|<>|!=|=|<|>/.test(expr)
+            ? `CASE WHEN ${expr} THEN 1 ELSE 0 END AS ${alias}`
+            : whole;
+        }
+      ),
 
   // `||` does not concatenate in T-SQL.
   concat: (sql) => sql.replace(/'%'\s*\|\|\s*(\w+)\s*\|\|\s*'%'/g, "'%' + $1 + '%'"),

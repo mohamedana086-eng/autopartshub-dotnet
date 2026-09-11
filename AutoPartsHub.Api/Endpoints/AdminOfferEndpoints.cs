@@ -100,12 +100,24 @@ public static class AdminOfferEndpoints
                    s."active" AS "SupplierActive", o."purchasePrice" AS "PurchasePrice",
                    o."stockDays" AS "StockDays", o."supplierPartNumber" AS "SupplierPartNumber",
                    o."active" AS "Active",
-                   (bo."supplierId" = o."supplierId") AS "IsBest"
+                   CASE WHEN bo."supplierId" = o."supplierId" THEN 1 ELSE 0 END AS "IsBest"
             FROM "SupplierOffer" o
             JOIN "Supplier" s ON s."id" = o."supplierId"
             LEFT JOIN "BestOffer" bo ON bo."productId" = o."productId"
             WHERE o."productId" = {productId}
-            ORDER BY (bo."supplierId" = o."supplierId") DESC NULLS LAST,
+            -- The winning offer first, then the same order BestOffer itself
+            -- uses. Two PostgreSQL spellings had to change here and they are
+            -- easy to conflate:
+            --
+            -- `(a = b)` is a boolean VALUE there and can be sorted. T-SQL has
+            -- no boolean type at all, so the comparison becomes a CASE
+            -- producing a number.
+            --
+            -- `NULLS LAST` has no equivalent either, and the default differs:
+            -- PostgreSQL sorts nulls last under DESC, SQL Server sorts them
+            -- first. The CASE removes the question — a part with no best offer
+            -- yields 0, not null, so there is nothing left to place.
+            ORDER BY CASE WHEN bo."supplierId" = o."supplierId" THEN 1 ELSE 0 END DESC,
                      s."priority" DESC, o."purchasePrice" ASC, s."code" ASC
             """).ToListAsync(ct);
 

@@ -43,13 +43,18 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    COALESCE(cur."code", base."code") AS "CurrencyCode",
                    COALESCE(cur."symbol", base."symbol") AS "CurrencySymbol",
                    COALESCE(cur."rate", base."rate") AS "CurrencyRate"
-            FROM (SELECT 1) AS anchor
+            -- The one-row anchor every left join hangs off, so an anonymous
+            -- visitor still comes back with a tier and a currency rather than
+            -- with no row at all. PostgreSQL is happy to leave the column
+            -- unnamed; SQL Server requires a derived table to name its columns,
+            -- and the name is never read.
+            FROM (SELECT 1 AS "one") AS anchor
             LEFT JOIN "Client" c ON c."id" = {userId}
             LEFT JOIN "ClientCategory" cat
                    ON cat."id" = {categoryId}
                    OR ({categoryId} IS NULL AND cat."name" = 'Retail')
             LEFT JOIN "Currency" cur ON cur."id" = c."currencyId" AND cur."active" = 1
-            LEFT JOIN "Currency" base ON base."isBase"
+            LEFT JOIN "Currency" base ON base."isBase" = 1
             """).ToListAsync(ct)).FirstOrDefault();
 
         // Ordered by id, because the engine sorts by specificity then priority
@@ -69,12 +74,16 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    -- As epoch milliseconds, not as dates. The two ports have
                    -- to agree on a window to the millisecond, and neither
                    -- timezone handling nor date parsing is the same in both
-                   -- languages — whereas a number is a number. AT TIME ZONE
-                   -- 'UTC' pins down what a bare TIMESTAMP means rather than
-                   -- leaving it to the driver.
-                   (EXTRACT(EPOCH FROM "startsAt" AT TIME ZONE 'UTC') * 1000)::bigint
+                   -- languages — whereas a number is a number.
+                   --
+                   -- PostgreSQL needed AT TIME ZONE 'UTC' here to pin down what
+                   -- a bare TIMESTAMP meant rather than leaving it to the
+                   -- driver. Nothing pins it down now because there is nothing
+                   -- left to pin: every datetime2 in this schema is UTC, and
+                   -- DATEDIFF_BIG from the epoch reads it as one.
+                   DATEDIFF_BIG(millisecond, '1970-01-01', "startsAt")
                      AS "StartsAtMs",
-                   (EXTRACT(EPOCH FROM "endsAt" AT TIME ZONE 'UTC') * 1000)::bigint
+                   DATEDIFF_BIG(millisecond, '1970-01-01', "endsAt")
                      AS "EndsAtMs"
             FROM "MarkupRule"
             WHERE "active" = 1

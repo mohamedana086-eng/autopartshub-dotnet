@@ -83,6 +83,17 @@ function parameterise(sql) {
     .replace(/\bOFFSET\s+NULL\b/g, 'OFFSET 0')
     .replace(/\bFETCH\s+NEXT\s+NULL\b/g, 'FETCH NEXT 1');
 
+  // And in a CASE that decides an ORDER BY. `CASE WHEN NULL = 1 THEN "col" END`
+  // is provably constant, so SQL Server refuses it — "a constant expression was
+  // encountered in the ORDER BY list" — where the same statement with a real
+  // parameter is accepted. A declared variable is what the application
+  // actually sends, and it restores the only thing NULL was wrong about here:
+  // that the value is not known at compile time.
+  const flags = [...text.matchAll(/CASE WHEN NULL =/g)].length;
+  if (flags > 0) {
+    text = `DECLARE @flag bit;\n${text.replace(/CASE WHEN NULL =/g, 'CASE WHEN @flag =')}`;
+  }
+
   return { text, names: [] };
 }
 

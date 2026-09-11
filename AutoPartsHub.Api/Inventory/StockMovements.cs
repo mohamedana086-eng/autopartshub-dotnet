@@ -143,15 +143,19 @@ public static class StockMovements
         if (change.Quantity == 0 && change.Reserved == 0) return;
 
         await db.Database.ExecuteSqlAsync($"""
-            UPDATE "StockLevel" s
+            -- PostgreSQL names the table being updated and lists the joined
+            -- ones in FROM. T-SQL names the ALIAS and puts the target into the
+            -- FROM with the rest, which also means the conditions linking it to
+            -- them become join conditions rather than sitting in the WHERE.
+            UPDATE s
             SET "quantity" = s."quantity" + (a."quantity" * {change.Quantity}),
                 "reserved" = s."reserved" + (a."quantity" * {change.Reserved}),
                 "updatedAt" = SYSUTCDATETIME()
-            FROM "OrderItemAllocation" a
+            FROM "StockLevel" s
+            JOIN "OrderItemAllocation" a ON a."warehouseId" = s."warehouseId"
             JOIN "OrderItem" i ON i."id" = a."orderItemId"
+                              AND i."productId" = s."productId"
             WHERE i."orderId" = {orderId}
-              AND s."productId" = i."productId"
-              AND s."warehouseId" = a."warehouseId"
             """, ct);
     }
 

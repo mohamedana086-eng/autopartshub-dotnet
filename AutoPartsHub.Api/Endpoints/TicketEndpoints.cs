@@ -52,7 +52,7 @@ public static class TicketEndpoints
                        o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                        t."lastMessageAt" AS "LastMessageAt",
                        (SELECT COUNT(*) FROM "TicketMessage" m
-                         WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
+                         WHERE m."ticketId" = t."id" AND m."internal" = 0) AS "MessageCount"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
                 LEFT JOIN "Order" o ON o."id" = t."orderId"
@@ -200,7 +200,7 @@ public static class TicketEndpoints
                        o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                        t."lastMessageAt" AS "LastMessageAt",
                        (SELECT COUNT(*) FROM "TicketMessage" m
-                         WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
+                         WHERE m."ticketId" = t."id" AND m."internal" = 0) AS "MessageCount"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
                 LEFT JOIN "Order" o ON o."id" = t."orderId"
@@ -377,7 +377,7 @@ public static class TicketEndpoints
                    o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                    t."lastMessageAt" AS "LastMessageAt",
                    (SELECT COUNT(*) FROM "TicketMessage" m
-                     WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
+                     WHERE m."ticketId" = t."id" AND m."internal" = 0) AS "MessageCount"
             FROM "Ticket" t
             JOIN "Client" c ON c."id" = t."clientId"
             LEFT JOIN "Order" o ON o."id" = t."orderId"
@@ -401,7 +401,7 @@ public static class TicketEndpoints
             SELECT "id" AS "Id", "authorName" AS "AuthorName", "fromStaff" AS "FromStaff",
                    "internal" AS "Internal", "body" AS "Body", "createdAt" AS "CreatedAt"
             FROM "TicketMessage"
-            WHERE "ticketId" = {ticketId} AND NOT "internal"
+            WHERE "ticketId" = {ticketId} AND "internal" = 0
             ORDER BY "createdAt" ASC
             """).ToListAsync(ct);
 

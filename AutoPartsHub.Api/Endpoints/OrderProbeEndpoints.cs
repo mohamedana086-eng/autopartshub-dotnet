@@ -34,20 +34,28 @@ public static class OrderProbeEndpoints
             // many and where. Only reserved moves: the goods never left, so
             // quantity was never touched when the order was placed.
             var released = await db.Database.ExecuteSqlAsync($"""
-                UPDATE "StockLevel" s
+                -- PostgreSQL names the table being updated and lists the joined
+                -- ones in FROM. T-SQL names the ALIAS and puts the target into
+                -- the FROM with the rest, which also means the conditions
+                -- linking it to them become join conditions rather than sitting
+                -- in the WHERE.
+                UPDATE s
                 SET "reserved" = s."reserved" - a."quantity",
                     "updatedAt" = SYSUTCDATETIME()
-                FROM "OrderItemAllocation" a
+                FROM "StockLevel" s
+                JOIN "OrderItemAllocation" a ON a."warehouseId" = s."warehouseId"
                 JOIN "OrderItem" i ON i."id" = a."orderItemId"
+                                  AND i."productId" = s."productId"
                 WHERE i."orderId" = {body.OrderId}
-                  AND s."productId" = i."productId"
-                  AND s."warehouseId" = a."warehouseId"
                 """, ct);
 
             var allocations = await db.Database.ExecuteSqlAsync($"""
-                DELETE FROM "OrderItemAllocation" a
-                USING "OrderItem" i
-                WHERE i."id" = a."orderItemId" AND i."orderId" = {body.OrderId}
+                -- PostgreSQL's USING is T-SQL's second FROM: the alias goes
+                -- after DELETE to say which of the joined tables loses rows.
+                DELETE a
+                FROM "OrderItemAllocation" a
+                JOIN "OrderItem" i ON i."id" = a."orderItemId"
+                WHERE i."orderId" = {body.OrderId}
                 """, ct);
 
             var lines = await db.Database.ExecuteSqlAsync(

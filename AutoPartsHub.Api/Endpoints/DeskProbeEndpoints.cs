@@ -43,8 +43,12 @@ public static class DeskProbeEndpoints
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
             var carts = await db.Database.ExecuteSqlAsync($"""
-                DELETE FROM "CartItem" ci USING "Cart" c
-                WHERE c."id" = ci."cartId" AND c."clientId" = {body.ClientId}
+                -- PostgreSQL's USING is T-SQL's second FROM: the alias goes
+                -- after DELETE to say which of the joined tables loses rows.
+                DELETE ci
+                FROM "CartItem" ci
+                JOIN "Cart" c ON c."id" = ci."cartId"
+                WHERE c."clientId" = {body.ClientId}
                 """, ct);
             await db.Database.ExecuteSqlAsync(
                 $"""DELETE FROM "Cart" WHERE "clientId" = {body.ClientId}""", ct);
