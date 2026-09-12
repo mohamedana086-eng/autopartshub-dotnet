@@ -451,6 +451,7 @@ because the update and the stock movement are in the same transaction.
 | `tools/supplier-signup.mjs` | 39 cases, and the eight places a hidden part could leak |
 | `tools/order-post.mjs` | the refusals, then one real order, then removed |
 | `tools/stock-race.mjs` | two concurrent orders for the last unit; one wins |
+| `tools/cart-lines.mjs` | the basket a line at a time, and eight concurrent adds with none lost |
 | `tools/auth-interop.mjs` | a cookie from either API is accepted by the other |
 
 Five of them write. All five make their own rows, count what was there before

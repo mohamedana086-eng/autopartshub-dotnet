@@ -28,9 +28,10 @@ this file is checked by running the generator and looking at the diff.
 
 ## The count
 
-100 routes. **Every route the storefront calls is answered.** Five are answered
-and not yet called: `POST /api/auth/register-supplier` and the four order
-verbs, all of them the first step of a move described below.
+103 routes. **Every route the storefront calls is answered.** Eight are
+answered and not yet called: `POST /api/auth/register-supplier`, the four order
+verbs and the three cart lines — all of them the first step of a move described
+below.
 
 ## ~~What the storefront asks for and nothing answers~~ — closed (T-196)
 
@@ -68,7 +69,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires — six left
+## The nine differences the backlog requires — five left
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -79,7 +80,7 @@ each has to be settled before the screen is built rather than after.
 |---|---|---|
 | Supplier sign-up | ~~`POST /api/suppliers/register`~~ — both served | `POST /api/auth/register-supplier` ✅ |
 | Failed searches | `GET /api/admin/search-misses` | `GET /api/admin/failed-searches` + `resolve` / `reopen` |
-| Cart write | `PUT /api/cart` (whole-basket replace) | `POST` / `PATCH` / `DELETE /api/cart/lines` |
+| Cart write | ~~`PUT /api/cart`~~ — both served | `POST` / `PATCH` / `DELETE /api/cart/lines` ✅ |
 | Bulk body | `partNumbers[]`, 1000 rows | `rows[]` with a manufacturer per row, 2000 rows, 2 MB |
 | Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
 | Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products`, + `GET manager/scope` |
@@ -87,7 +88,7 @@ each has to be settled before the screen is built rather than after.
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | `partType` | `offerType`, kept separate from `matchIn` |
 
-Three rows have moved, and all in the same way: the new shape is served and the
+Four rows have moved, and all in the same way: the new shape is served and the
 old one still is, so the caller changes when it changes.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
@@ -131,7 +132,21 @@ Everything else in the table is still as it was.
 because the storefront keeps the basket in `localStorage` and mirrors it — the
 endpoint was shaped around a client that owns the state. The line-level
 contract is the other way round, and moving to it is a change on both sides at
-once (T-171, T-172, T-174).
+once (T-171, T-172, T-174), so both are served until the storefront moves.
+
+The difference between them is not shape, it is a race. The PUT carries the
+whole basket, so there is nothing to read first and nothing to lose; a line
+change means reading what is there and writing what should be, and two tabs
+doing that together can each read one, each write two, and lose an add. So the
+line routes open by taking the same `MERGE … WITH (HOLDLOCK)` on the Cart row
+that the whole-basket write does — a lock per customer, which is the grain that
+matters: two tabs belonging to one person serialise, and two customers never
+wait for each other. `tools/cart-lines.mjs` sends eight adds at once and counts
+what arrived.
+
+Every rule about what a basket may hold is the PUT's own, reached through one
+shared function. A second shape that validated less would be a way into the
+basket that the first one closes.
 
 ## Shared vocabulary
 
@@ -255,6 +270,9 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `GET` | `/api/auth/session` | Endpoints/AuthEndpoints.cs:148 | core/auth.service.ts:46 |
 | `GET` | `/api/cart` | Endpoints/CartEndpoints.cs:32 | core/cart.service.ts:260 |
 | `PUT` | `/api/cart` | Endpoints/CartEndpoints.cs:49 | core/cart.service.ts:235 |
+| `POST` | `/api/cart/lines` | Endpoints/CartEndpoints.cs:139 | _none_ |
+| `DELETE` | `/api/cart/lines/{productId}` | Endpoints/CartEndpoints.cs:188 | _none_ |
+| `PATCH` | `/api/cart/lines/{productId}` | Endpoints/CartEndpoints.cs:164 | _none_ |
 | `POST` | `/api/catalog/bulk` | Endpoints/BulkLookupEndpoints.cs:26 | pages/bulk.page.ts:258 |
 | `GET` | `/api/catalog/products/{id}` | Endpoints/ProductEndpoints.cs:13 | core/catalog.service.ts:67 |
 | `GET` | `/api/catalog/search` | Endpoints/SearchEndpoints.cs:58 | core/catalog.service.ts:53 |
