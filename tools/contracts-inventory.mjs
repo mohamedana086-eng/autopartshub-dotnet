@@ -150,7 +150,12 @@ const table = rows
 if (!write) {
   process.stdout.write(table + '\n');
 } else {
-  const doc = readFileSync(CONTRACTS, 'utf8');
+  // Read with whatever line endings are on disk normalised away. core.autocrlf
+  // is on here, so a checkout can hand this file back either way and an
+  // anchor written with \n misses a file written with \r\n — which looks like
+  // "the table is gone" rather than like a line-ending problem, and is the
+  // sort of thing that gets fixed by deleting the anchor.
+  const doc = readFileSync(CONTRACTS, 'utf8').split(/\r?\n/).join('\n');
   // Everything from the table's header row to the end of the file is
   // generated; the prose above it is not.
   const header = '| Verb | Path | Handler | Called from |\n|---|---|---|---|\n';

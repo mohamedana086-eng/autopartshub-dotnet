@@ -30,6 +30,19 @@ public record ShelfChange(int Quantity, int Reserved);
 public record StatusChange(string Status, string? Reason, string? TrackingNumber, string? Carrier);
 
 /// <summary>
+/// A correction to where a shipment is, with no status change.
+/// </summary>
+/// <remarks>
+/// Separate from <see cref="StatusChange"/> because it answers a different
+/// question. A tracking number given on the move to <c>shipped</c> is part of
+/// that move; a tracking number given afterwards is a correction — the carrier
+/// reissued it, or somebody typed it wrong — and the order does not move for
+/// it. Folding the second into the first would mean re-saving a status to
+/// change a number, which writes a status-change row that did not happen.
+/// </remarks>
+public record ShippingChange(string? TrackingNumber, string? Carrier);
+
+/// <summary>
 /// What can happen to an order, in what order, and what it does to the shelves.
 /// </summary>
 /// <remarks>
@@ -159,10 +172,26 @@ public static class OrderStatuses
     /// that has already shipped, and the two refusals read differently on
     /// purpose.
     /// </remarks>
-    public static Validated<StatusChange> ReadStatusChange(JsonElement body, string from)
-    {
-        var status = JsonValues.AsString(JsonValues.Get(body, "status")).Trim();
+    public static Validated<StatusChange> ReadStatusChange(JsonElement body, string from) =>
+        ReadStatusChange(body, from, JsonValues.AsString(JsonValues.Get(body, "status")).Trim());
 
+    /// <summary>
+    /// The same, with the destination given rather than read from the body.
+    /// </summary>
+    /// <remarks>
+    /// For the routes that name the move — <c>POST …/approve</c>,
+    /// <c>…/reject</c>, <c>…/cancel</c> — where the status is in the path and
+    /// the body carries only a reason.
+    ///
+    /// An overload rather than a second reader, so that every rule stays in
+    /// one place: what the vocabulary is, whether the move is open from here,
+    /// which moves have to say why, and that tracking belongs to the act of
+    /// shipping. A verb route with its own copy of those would be the version
+    /// that drifts, and it would drift silently — each rule it lost is a
+    /// refusal that stops happening.
+    /// </remarks>
+    public static Validated<StatusChange> ReadStatusChange(JsonElement body, string from, string status)
+    {
         if (!IsKnown(status))
         {
             return Validation.Fail<StatusChange>(
@@ -209,6 +238,52 @@ public static class OrderStatuses
         }
 
         return Validation.Ok(new StatusChange(status, reason, trackingNumber, carrier));
+    }
+
+    /// <summary>Whether the goods have left, in any of the three ways that
+    /// means.</summary>
+    /// <remarks>
+    /// Read off the transition map rather than listed, so it cannot disagree
+    /// with it: <c>shipped</c> and everything reachable from it. Today that is
+    /// <c>delivered</c> and <c>paid</c>.
+    /// </remarks>
+    public static bool HasShipped(string status) =>
+        status == Shipped || MovesFrom(Shipped).Contains(status)
+        || MovesFrom(Shipped).Any(s => MovesFrom(s).Contains(status));
+
+    /// <summary>
+    /// Reads a correction to a shipment that has already left.
+    /// </summary>
+    /// <remarks>
+    /// Only after the order has shipped. Before that there is nothing to
+    /// track, and a tracking number on an order still being picked is a number
+    /// a customer would be given and could not use — the same rule
+    /// <see cref="ReadStatusChange(JsonElement, string, string)"/> enforces
+    /// from the other side.
+    ///
+    /// At least one of the two has to be given. A request that changes nothing
+    /// is not an error worth refusing on its own, but here it almost always
+    /// means the caller sent the wrong field name, and answering "nothing
+    /// changed" to that reads as success.
+    /// </remarks>
+    public static Validated<ShippingChange> ReadShippingChange(JsonElement body, string from)
+    {
+        if (!HasShipped(from))
+        {
+            return Validation.Fail<ShippingChange>(
+                $"This order is {from}. A tracking number can only be set once it has shipped.");
+        }
+
+        var trackingNumber = Text(JsonValues.Get(body, "trackingNumber"));
+        var carrier = Text(JsonValues.Get(body, "carrier"));
+
+        if (trackingNumber is null && carrier is null)
+        {
+            return Validation.Fail<ShippingChange>(
+                "Give a trackingNumber, a carrier, or both.");
+        }
+
+        return Validation.Ok(new ShippingChange(trackingNumber, carrier));
     }
 
     private static string? Text(JsonElement? element)

@@ -28,9 +28,9 @@ this file is checked by running the generator and looking at the diff.
 
 ## The count
 
-96 routes. **Every route the storefront calls is answered.** One is answered
-and not yet called — `POST /api/auth/register-supplier`, which is the first
-step of the move described below.
+100 routes. **Every route the storefront calls is answered.** Five are answered
+and not yet called: `POST /api/auth/register-supplier` and the four order
+verbs, all of them the first step of a move described below.
 
 ## ~~What the storefront asks for and nothing answers~~ — closed (T-196)
 
@@ -68,7 +68,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires — seven left
+## The nine differences the backlog requires — six left
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -81,17 +81,33 @@ each has to be settled before the screen is built rather than after.
 | Failed searches | `GET /api/admin/search-misses` | `GET /api/admin/failed-searches` + `resolve` / `reopen` |
 | Cart write | `PUT /api/cart` (whole-basket replace) | `POST` / `PATCH` / `DELETE /api/cart/lines` |
 | Bulk body | `partNumbers[]`, 1000 rows | `rows[]` with a manufacturer per row, 2000 rows, 2 MB |
-| Order approval | `PATCH /api/admin/orders/{id}` | `POST approve` / `reject` / `cancel`, `PATCH shipping` |
+| Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
 | Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products`, + `GET manager/scope` |
 | Ticket status | `PATCH /api/admin/tickets/{id}` | `PATCH /api/tickets/{id}/status` + `PUT following` |
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | `partType` | `offerType`, kept separate from `matchIn` |
 
-Two rows have moved, and both in the same way: the new shape is served and the
+Three rows have moved, and all in the same way: the new shape is served and the
 old one still is, so the caller changes when it changes.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
 waits on the storefront.
+
+The order verbs are the same three moves with the status in the path instead of
+the body, plus one route that is not a move at all. All five go through one
+function, and the destination is handed to the same reader that used to find it
+in the body — so the vocabulary, whether the move is open from where the order
+is, which moves have to say why, and that a tracking belongs to the act of
+shipping are decided in one place however the request was shaped. A test walks
+every status against every status and asserts the two shapes decide
+identically.
+
+`PATCH …/shipping` corrects a tracking number without moving the order, which
+is why it is its own route rather than a status change that happens to keep the
+status: doing it through the move would write `statusChangedAt` and
+`statusChangedById` for a change that did not happen. It sends no email — the
+customer was told when it shipped, and a second message with the same subject
+and a different number reads as a second shipment.
 
 `/health/ready` is the readiness probe — should this instance be in the
 rotation, as against `/health`'s "is this process alive". Two checks decide:
@@ -184,7 +200,11 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `GET` | `/api/admin/notifications` | Endpoints/AdminDeskEndpoints.cs:446 | core/admin.service.ts:487 |
 | `POST` | `/api/admin/notifications` | Endpoints/AdminDeskWriteEndpoints.cs:111 | core/admin.service.ts:492 |
 | `GET` | `/api/admin/orders` | Endpoints/AdminDeskEndpoints.cs:209 | core/admin.service.ts:156 |
-| `PATCH` | `/api/admin/orders/{id}` | Endpoints/AdminOrderWriteEndpoints.cs:35 | core/admin.service.ts:168 |
+| `PATCH` | `/api/admin/orders/{id}` | Endpoints/AdminOrderWriteEndpoints.cs:40 | core/admin.service.ts:168 |
+| `POST` | `/api/admin/orders/{id}/approve` | Endpoints/AdminOrderWriteEndpoints.cs:72 | _none_ |
+| `POST` | `/api/admin/orders/{id}/cancel` | Endpoints/AdminOrderWriteEndpoints.cs:94 | _none_ |
+| `POST` | `/api/admin/orders/{id}/reject` | Endpoints/AdminOrderWriteEndpoints.cs:83 | _none_ |
+| `PATCH` | `/api/admin/orders/{id}/shipping` | Endpoints/AdminOrderWriteEndpoints.cs:135 | _none_ |
 | `GET` | `/api/admin/orders/{id}/suppliers` | Endpoints/AdminDeskEndpoints.cs:90 | core/admin.service.ts:179 |
 | `GET` | `/api/admin/outlets` | Endpoints/AdminReferenceEndpoints.cs:92 | core/admin.service.ts:326 |
 | `POST` | `/api/admin/outlets` | Endpoints/AdminSiteWriteEndpoints.cs:293 | core/admin.service.ts:330 |
