@@ -39,9 +39,16 @@ on a machine with nothing installed.
 
 **Fourteen column defaults the scaffold did not bring across.** Every one on a
 NOT NULL column, so every one a 500 on any INSERT that did not name it —
-registration was the first found, by running it. `tools/default-audit.mjs`
+registration was the first found, by running it. `tools/schema-audit.mjs`
 compares Prisma's schema against SQL Server's catalogue and found the rest;
 it reports nothing missing. Section 2b.
+
+**And the rest of that class, found by looking.** Fourteen of one kind is a
+reason to go looking rather than to feel finished.
+`tools/schema-audit.mjs` compares every table, column, nullability, default,
+unique constraint, foreign key, index and delete action. It found one missing
+unique, three missing foreign keys and three missing indexes. All fixed; it
+reports nothing unexplained. Section 2c.
 
 **Account recovery (T-196).** The four routes the storefront called and nothing
 answered — forgot, reset, confirm, resend — and the confirmation link
@@ -246,7 +253,7 @@ INSERT that does not name that column.
 | Interchange | isOEM | | ProductImage | sortOrder |
 | Manufacturer | isOEM | | VehicleSystem | order |
 
-`tools/default-audit.mjs` found the other thirteen by comparing Prisma's
+`tools/schema-audit.mjs` found the other thirteen by comparing Prisma's
 schema — which IS the PostgreSQL one — against SQL Server's catalogue, so they
 were found by reading rather than one at a time by whoever hit them. It reports
 nothing missing now. **Run it after any schema change.**
@@ -256,6 +263,53 @@ once, while writing the near-miss fixtures: an INSERT failed, the column was
 added to it, and the work carried on. That is the shape this class of bug hides
 in — in a fixture it looks like a fixture detail, and only in an endpoint does
 it look like what it is.
+
+### 2c. The rest of the same class
+
+Fourteen missing defaults is not a coincidence, it is a sample.
+`tools/schema-audit.mjs` reads Prisma's schema and SQL Server's catalogue and
+compares **every** table, column, nullability, default, unique constraint,
+foreign key, index and delete action — by shape rather than by name, because an
+index called `Product_partNumber_key` in one and `IX_Product_partNumber` in
+the other is the same index and a report saying otherwise is noise.
+
+What it found beyond the defaults:
+
+| | What it was costing |
+|---|---|
+| `GoodsCategory.name` had no unique | two categories of the same name: an admin list with one row in it twice, and a markup that depends on which of them a part was filed under |
+| `Order.statusChangedById`, `TicketMessage.authorId`, `PriceListImport.uploadedById` had no foreign key | a row could name an account that never existed |
+| `Order (status, createdAt)`, `VinLookup (decodedAt)`, `SearchMiss (searches)` had no index | the desk list and two admin reports, each scanning |
+
+All are fixed. It reports nothing unexplained now.
+
+**Two things it got wrong on the way, both worth keeping.**
+
+*A list is not NOT NULL.* It reported `VehicleMake.wmiCodes` as NOT NULL in
+PostgreSQL and nullable here, because Prisma's client types say a `String[]`
+field is always present. The column Prisma generates is `"wmiCodes" TEXT[]`
+with no NOT NULL — checked in the migration SQL rather than argued about. So
+Prisma's schema is the SOURCE of the PostgreSQL schema and not a transcript of
+it, and where a finding is surprising the DDL in `prisma/migrations` is what
+settles it.
+
+*Three foreign keys were made NO ACTION on a guess.* The belief was that SQL
+Server refuses a second path between two tables it already joins. It refuses a
+second CASCADE path — and the first path in each of these is Restrict, so
+there was no conflict. Asked directly, the engine accepted SET NULL on all
+three:
+
+```
+Order.statusChangedById      SET NULL: accepted
+TicketMessage.authorId       SET NULL: accepted
+PriceListImport.uploadedById SET NULL: accepted
+Client.salesManagerId        SET NULL: Could not create constraint or index.
+```
+
+Three now match PostgreSQL. The fourth is a self-reference, which SQL Server
+will not do at all, and it is the one difference the audit still reports —
+with its reason printed beside it, because an allowance without one is how a
+real difference gets filed under "known".
 
 ### 3. ~~What the check cannot tell you~~ — done
 
@@ -432,9 +486,11 @@ One statement is expected to fail, on an instance without Full-Text Search —
 see section 2.
 
 ```bash
-node tools/default-audit.mjs
+node tools/schema-audit.mjs
 ```
 
-Column defaults PostgreSQL has and SQL Server does not. It should print
-"Nothing missing"; anything it lists is an INSERT that will fail somewhere. Run
-it after any schema change — section 2b.
+Every difference between PostgreSQL's schema and this one — tables, columns,
+nullability, defaults, uniques, foreign keys, delete actions, and `--indexes`
+for the rest. It should print "Nothing unexplained"; anything above that line
+is a write that behaves differently on the two engines. Run it after any schema
+change — sections 2b and 2c.

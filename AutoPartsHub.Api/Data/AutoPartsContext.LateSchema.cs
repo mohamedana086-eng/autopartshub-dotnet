@@ -112,6 +112,26 @@ public partial class AutoPartsContext
             // stops it being read as one.
             entity.Property(e => e.WeightComplete).HasDefaultValue(true).HasColumnName("weightComplete");
             entity.Property(e => e.WeightGrams).HasDefaultValue(0).HasColumnName("weightGrams");
+
+            // The admin desk's list: orders of one status, newest first. It is
+            // the query that runs every time somebody opens the desk, and the
+            // only one on this table that reads a range rather than a row.
+            entity.HasIndex(e => new { e.Status, e.CreatedAt }, "Order_status_createdAt_idx");
+
+            // Who last moved the order, which is a SECOND relation to Client —
+            // the first being whose order it is. Declared without a navigation
+            // because nothing reads it as one: the name is copied onto the row
+            // beside the id, so the desk can say who did it without a join.
+            //
+            // SET NULL, which is what PostgreSQL has. It was NO ACTION here
+            // first, on the assumption that SQL Server would refuse a second
+            // path between two tables it already joins — it refuses a second
+            // CASCADE path, and the first path is Restrict. The engine was
+            // asked and accepted it.
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.StatusChangedById)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("Order_statusChangedById_fkey");
         });
 
         modelBuilder.Entity<PriceList>(entity =>
@@ -203,6 +223,12 @@ public partial class AutoPartsContext
             entity.ToTable("GoodsCategory");
 
             entity.HasIndex(e => e.Slug, "GoodsCategory_slug_key").IsUnique();
+            // Missed when this table was written out by hand — slug got its
+            // unique and name did not. Two categories called the same thing is
+            // not a crash; it is an admin list with the same row in it twice
+            // and a markup that depends on which one a part happened to be
+            // filed under.
+            entity.HasIndex(e => e.Name, "GoodsCategory_name_key").IsUnique();
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Name).HasColumnName("name");
@@ -276,6 +302,10 @@ public partial class AutoPartsContext
             // it true rather than intended.
             entity.HasIndex(e => e.Pattern, "VinLookup_pattern_key").IsUnique();
             entity.HasIndex(e => e.Wmi, "VinLookup_wmi_idx");
+            // The other half of the same pair, missed here. It answers "what
+            // has been decoded lately", which is the report this table exists
+            // to feed.
+            entity.HasIndex(e => e.DecodedAt, "VinLookup_decodedAt_idx");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Pattern).HasColumnName("pattern");
@@ -305,6 +335,10 @@ public partial class AutoPartsContext
             // rows — see the property.
             entity.HasIndex(e => new { e.Term, e.Narrowed }, "SearchMiss_term_narrowed_key").IsUnique();
             entity.HasIndex(e => e.LastSeenAt, "SearchMiss_lastSeenAt_idx");
+            // Missed beside it. The admin report reads this table twice —
+            // what was searched for most, and what was searched for last —
+            // and only one of the two had an index.
+            entity.HasIndex(e => e.Searches, "SearchMiss_searches_idx");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.Term).HasColumnName("term");
@@ -397,6 +431,14 @@ public partial class AutoPartsContext
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.TicketId).HasColumnName("ticketId");
             entity.Property(e => e.AuthorId).HasColumnName("authorId");
+            // Who wrote it — a second relation to Client, the first being
+            // whose ticket it is. No navigation: the name is copied onto the
+            // row, so a thread renders without a join. SET NULL, as PostgreSQL
+            // has: the message stays and stops naming an account that is gone.
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.AuthorId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("TicketMessage_authorId_fkey");
             entity.Property(e => e.AuthorName).HasColumnName("authorName");
             entity.Property(e => e.FromStaff).HasColumnName("fromStaff");
             entity.Property(e => e.Internal).HasDefaultValue(false).HasColumnName("internal");
@@ -426,6 +468,14 @@ public partial class AutoPartsContext
             entity.Property(e => e.ListName).HasColumnName("listName");
             entity.Property(e => e.SourceName).HasColumnName("sourceName");
             entity.Property(e => e.UploadedById).HasColumnName("uploadedById");
+            // Who uploaded the file. SET NULL, as PostgreSQL has — an import
+            // is a record of something that happened and should outlive the
+            // account that did it, which is what SET NULL does and what NO
+            // ACTION would have prevented by refusing the delete outright.
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.UploadedById)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("PriceListImport_uploadedById_fkey");
             entity.Property(e => e.UploadedByName).HasColumnName("uploadedByName");
             entity.Property(e => e.Outcome).HasColumnName("outcome");
             entity.Property(e => e.RowsSent).HasDefaultValue(0).HasColumnName("rowsSent");

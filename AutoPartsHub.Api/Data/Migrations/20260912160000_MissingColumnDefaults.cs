@@ -15,7 +15,7 @@ namespace AutoPartsHub.Api.Data.Migrations
     ///
     /// Registration was the first one found, by running it. See
     /// AutoPartsContext.Defaults.cs for how the other thirteen were found, and
-    /// tools/default-audit.mjs for the comparison that found them.
+    /// tools/schema-audit.mjs for the comparison that found them.
     /// </remarks>
     public partial class MissingColumnDefaults : Migration
     {

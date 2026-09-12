@@ -29,7 +29,7 @@ namespace AutoPartsHub.Api.Data;
 /// column it does not mention is exactly the point. Nor could the seeded
 /// tests: they write rows through fixtures that name everything.
 ///
-/// <c>tools/default-audit.mjs</c> found the other thirteen by comparing
+/// <c>tools/schema-audit.mjs</c> found the other thirteen by comparing
 /// Prisma's schema — which IS the PostgreSQL one — against SQL Server's
 /// catalogue, so the rest were found by reading rather than by a customer.
 /// Run it after any schema change.
