@@ -33,8 +33,13 @@ is not read. It is gitignored. `DATABASE_URL` may be either a
 own `Host=…;Database=…` form; see `Data/ConnectionString.cs`.
 
 ```
-GET /health      the process is up
-GET /health/db   it can reach the database, and how many products it can see
+GET /health        the process is up
+GET /health/db     it can reach the database, and how many products it can see
+GET /health/ready  it should be in the rotation: the database answers AND its
+                   schema is current. 503 until both hold — which is what a
+                   deployment looks like between starting and finishing its
+                   migrations. The cache, full text and the mail transport are
+                   reported beside them and do not decide.
 ```
 
 ## The container

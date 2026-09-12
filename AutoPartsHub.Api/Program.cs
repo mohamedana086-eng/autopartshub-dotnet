@@ -70,6 +70,7 @@ builder.Services.AddSingleton(new SessionTokens(
 builder.Services.AddScoped<PricingContextLoader>();
 builder.Services.AddSingleton<FullTextSearch>();
 builder.Services.AddScoped<AutoPartsHub.Api.Auth.VerificationTokens>();
+builder.Services.AddScoped<AutoPartsHub.Api.Health.Readiness>();
 builder.Services.AddScoped<SearchQueries>();
 builder.Services.AddScoped<SpecQueries>();
 builder.Services.AddScoped<AutoPartsHub.Api.Vehicles.VehicleFinder>();
@@ -194,6 +195,19 @@ app.MapGet("/health/db", async (AutoPartsContext db) =>
     await db.Database.CanConnectAsync()
         ? Results.Ok(new { ok = true, products = await db.Products.CountAsync() })
         : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+
+// Readiness: should this instance be in the rotation. It answers 503 when the
+// database is unreachable or its schema is behind the code, and 200 with the
+// detail otherwise — including the things that are reported and do not decide.
+// See Readiness for which is which and why the cache is not one of them.
+app.MapGet("/health/ready", async (AutoPartsHub.Api.Health.Readiness readiness, CancellationToken ct) =>
+{
+    var report = await readiness.CheckAsync(ct);
+
+    return Results.Json(report, statusCode: report.Ready
+        ? StatusCodes.Status200OK
+        : StatusCodes.Status503ServiceUnavailable);
+});
 
 app.MapCatalogueEndpoints();
 app.MapSupplierPageEndpoints();

@@ -68,7 +68,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires
+## The nine differences the backlog requires — seven left
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -84,13 +84,32 @@ each has to be settled before the screen is built rather than after.
 | Order approval | `PATCH /api/admin/orders/{id}` | `POST approve` / `reject` / `cancel`, `PATCH shipping` |
 | Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products`, + `GET manager/scope` |
 | Ticket status | `PATCH /api/admin/tickets/{id}` | `PATCH /api/tickets/{id}/status` + `PUT following` |
-| Readiness | `/health/db` | `/health/ready` covering SQL Server and Redis |
+| Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | `partType` | `offerType`, kept separate from `matchIn` |
 
-The sign-up row is the one that has moved. Both paths are served, so the
-storefront can change when it changes; dropping `/api/suppliers/register` is
-the third step and waits on the caller moving. Everything else in the table is
-still as it was.
+Two rows have moved, and both in the same way: the new shape is served and the
+old one still is, so the caller changes when it changes.
+
+Dropping `/api/suppliers/register` is the third step of the sign-up move and
+waits on the storefront.
+
+`/health/ready` is the readiness probe — should this instance be in the
+rotation, as against `/health`'s "is this process alive". Two checks decide:
+the database, and whether its schema is behind the code. The second is the one
+worth having, because that is the state a deployment is in between starting and
+finishing its migrations, and it is exactly when a load balancer would
+otherwise send it traffic.
+
+The backlog says "covering SQL Server and Redis". There is no Redis in this
+deployment — `IPriceCache` is in memory — so the cache is checked through that
+interface and will cover Redis on the day it is one. It is REPORTED and does
+not decide, which is `IPriceCache`'s own instruction rather than a choice made
+here: "a cache that is down is a slow shop, and a cache that is down and
+throwing is a closed one". Failing readiness on it would close the shop to save
+it from being slow. Full text and the mail transport are reported for the same
+reason.
+
+Everything else in the table is still as it was.
 
 `PUT /api/cart` is the one worth naming twice. It is a whole-basket replace
 because the storefront keeps the basket in `localStorage` and mirrors it — the

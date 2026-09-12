@@ -468,6 +468,22 @@ stops being true the moment this one is pointed at SQL Server — so the
 storefront's PostgreSQL and this schema diverge from that moment, and the data
 has to be moved rather than mirrored.
 
+**`GET /health/ready` is in place for it.** A cutover has a window between a
+deployment starting and its migrations finishing, and an instance in that
+window answers queries against a schema two versions behind the code that is
+querying it. That is the one state a load balancer must not send traffic into,
+and it is the state a connection test cannot see — so readiness checks the
+database AND whether its schema is current, and answers 503 until both hold.
+
+It reports three more without deciding on them: the cache (`IPriceCache` says a
+cache that is down is a slow shop, not a closed one), whether full text is
+available — which says which lane the search's name half is on — and whether a
+mail transport is configured, which is the difference between a password reset
+that is sent and one that is accepted and never arrives.
+
+Two things still have to be decided rather than built: where SQL Server is
+hosted (BLK-003), and whether the storefront moves with it.
+
 ## Reproducing the numbers
 
 ```bash
