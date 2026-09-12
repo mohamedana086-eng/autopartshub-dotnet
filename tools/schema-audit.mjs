@@ -256,6 +256,35 @@ const ALLOWED = [
        + 'manager cannot be deleted while they still look after somebody, where '
        + 'PostgreSQL would let go of them. Nothing here deletes a Client.',
   },
+  // The three below are one rule seen three times: SQL Server allows exactly
+  // one referential action per pair of tables and refuses the second, whatever
+  // it is. Asked directly rather than assumed —
+  //
+  //   first  CASCADE                    accepted
+  //   second CASCADE to the same table  refused
+  //   second as NO ACTION               accepted
+  //
+  // So the cascade goes to the relation that matters and the rest refuse the
+  // delete. PostgreSQL keeps the better behaviour because it can; crippling
+  // the live schema to match a limitation of the one being moved to would be
+  // the wrong direction.
+  {
+    what: 'ManagerAccess (grantedById) -> Client',
+    why: 'ManagerAccess already cascades from Client on managerId, and SQL Server '
+       + 'allows one action per pair of tables. Deleting the admin who granted a '
+       + 'reach is refused here and clears the column there.',
+  },
+  {
+    what: 'ExtraClient (clientId) -> Client',
+    why: 'ExtraClient already cascades from Client on managerId — the relation that '
+       + 'matters, since a salesperson leaving should take their grants with them. '
+       + 'Deleting a CUSTOMER who appears in somebody granted list is refused here '
+       + 'and tidied away there.',
+  },
+  {
+    what: 'ExtraClient (grantedById) -> Client',
+    why: 'The third relation to Client on the same table, for the same reason.',
+  },
 ];
 
 const wanted = parsePrisma(readFileSync(PRISMA, 'utf8'));

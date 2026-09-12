@@ -69,7 +69,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires — five left
+## The nine differences the backlog requires — three left
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -83,12 +83,12 @@ each has to be settled before the screen is built rather than after.
 | Cart write | ~~`PUT /api/cart`~~ — both served | `POST` / `PATCH` / `DELETE /api/cart/lines` ✅ |
 | Bulk body | `partNumbers[]`, 1000 rows | `rows[]` with a manufacturer per row, 2000 rows, 2 MB |
 | Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
-| Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products`, + `GET manager/scope` |
+| Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products` — `GET manager/scope` ✅ |
 | Ticket status | `PATCH /api/admin/tickets/{id}` | `PATCH /api/tickets/{id}/status` + `PUT following` |
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
-| Search filter | `partType` | `offerType`, kept separate from `matchIn` |
+| Search filter | ~~`partType`~~ — both served | `offerType`, kept separate from `matchIn` ✅ |
 
-Four rows have moved, and all in the same way: the new shape is served and the
+Five rows have moved, and all in the same way: the new shape is served and the
 old one still is, so the caller changes when it changes.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
@@ -109,6 +109,32 @@ status: doing it through the move would write `statusChangedAt` and
 `statusChangedById` for a change that did not happen. It sends no email — the
 customer was told when it shipped, and a second message with the same subject
 and a different number reads as a second shipment.
+
+`offerType` is the first change to a RESPONSE rather than an addition of a
+route, and it had to be made in both APIs at once — `compare.mjs` diffs their
+bodies by joining the key list, so a key added to one is a difference in every
+one of its 325 cases. Both now emit `offerType` beside `partType` and
+`facets.offerTypes` beside `facets.partTypes`, in the same positions, and both
+accept either name on the way in with `offerType` winning when both are sent.
+
+**And `compare.mjs` could not check it.** Its own header states the premise it
+rests on — "Both read the same database, so the same request can be asked of
+each" — and that stopped being true when the .NET API's raw SQL was ported to
+SQL Server in place. The two are pointed at different databases holding
+different rows, and it cannot run again until the cutover copies the data
+across. Every response change made between now and then is made without it.
+
+Two things stand in for it. `tools/response-shape.mjs` reads both files and
+checks they build the same object, with the same keys, in the same order —
+which is what `compare.mjs` would have compared, minus the values.
+`tools/search-snapshot.mjs` checks one API against its own recorded past, which
+is the right instrument precisely when both are being changed: 228 responses
+were recorded before and after, and they are identical once the two new keys
+are removed.
+
+`GET /api/admin/manager/scope` answers what the signed-in member of staff may
+see, so a screen can narrow itself rather than re-deriving the rule. It is the
+first thing to read the two new tables — see below.
 
 `/health/ready` is the readiness probe — should this instance be in the
 rotation, as against `/health`'s "is this process alive". Two checks decide:
@@ -206,6 +232,7 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `POST` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:38 | core/admin.service.ts:66 |
 | `DELETE` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:108 | core/admin.service.ts:78 |
 | `PATCH` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:68 | core/admin.service.ts:72 |
+| `GET` | `/api/admin/manager/scope` | Endpoints/ManagerScopeEndpoints.cs:25 | _none_ |
 | `GET` | `/api/admin/markup-rules` | Endpoints/AdminReferenceEndpoints.cs:170 | core/admin.service.ts:99 |
 | `POST` | `/api/admin/markup-rules` | Endpoints/AdminPricingWriteEndpoints.cs:231 | core/admin.service.ts:103 |
 | `DELETE` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:349 | core/admin.service.ts:139 |

@@ -51,14 +51,125 @@ public partial class AutoPartsContext
 
     public virtual DbSet<BestOffer> BestOffers { get; set; } = null!;
 
+    public virtual DbSet<ManagerAccess> ManagerAccesses { get; set; } = null!;
+
+    public virtual DbSet<ExtraClient> ExtraClients { get; set; } = null!;
+
     private static void ConfigureLateSchema(ModelBuilder modelBuilder)
     {
+        ConfigureManagerReach(modelBuilder);
         ConfigureColumnsTheScaffoldMissed(modelBuilder);
         ConfigureCatalogueExtras(modelBuilder);
         ConfigureSupport(modelBuilder);
         ConfigureImports(modelBuilder);
         ConfigureBestOffer(modelBuilder);
         ConfigureMissingDefaults(modelBuilder);
+    }
+
+    /// <summary>
+    /// How far a salesperson's reach goes, and the accounts granted one at a
+    /// time.
+    /// </summary>
+    /// <remarks>
+    /// The two tables <c>ManagerReach</c> has been waiting for. Every guard
+    /// and every scoped query already handles Selected and All; only Own was
+    /// reachable, because there was nowhere to record the other two.
+    ///
+    /// ONE CASCADE PER TABLE, AND THE REST NO ACTION
+    /// ---------------------------------------------
+    /// PostgreSQL cascades all five of these from Client. SQL Server allows
+    /// exactly one path per pair of tables and refuses the second — asked
+    /// directly rather than assumed:
+    ///
+    ///   first  CASCADE                      accepted
+    ///   second CASCADE to the same table    refused
+    ///   second as NO ACTION                 accepted
+    ///
+    /// So the cascade goes to the one that matters — deleting a salesperson
+    /// takes their reach and their grants with them — and the rest refuse the
+    /// delete instead. The difference is real and is recorded as an allowance
+    /// in tools/schema-audit.mjs rather than left to be rediscovered: on
+    /// PostgreSQL, deleting a customer who appears in somebody's granted list
+    /// tidies the grant away; here it is refused. Nothing in this application
+    /// deletes a Client.
+    /// </remarks>
+    private static void ConfigureManagerReach(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ManagerAccess>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ManagerAccess_pkey");
+            entity.ToTable("ManagerAccess");
+
+            // One row per salesperson: two would be two answers to how far
+            // their reach goes, and nothing could choose between them.
+            entity.HasIndex(e => e.ManagerId, "ManagerAccess_managerId_key").IsUnique();
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ManagerId).HasColumnName("managerId");
+            entity.Property(e => e.Reach).HasDefaultValue("own").HasColumnName("reach");
+            entity.Property(e => e.GrantedById).HasColumnName("grantedById");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("updatedAt");
+
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.ManagerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("ManagerAccess_managerId_fkey");
+
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.GrantedById)
+                .OnDelete(DeleteBehavior.NoAction)
+                .HasConstraintName("ManagerAccess_grantedById_fkey");
+
+            // A reach nothing recognises would be read as whichever degree the
+            // last branch happens to be, and the safe reading of an unknown
+            // permission is not something to leave to a switch expression.
+            entity.ToTable(t => t.HasCheckConstraint(
+                "ManagerAccess_reach_known", "\"reach\" IN ('own', 'selected', 'all')"));
+        });
+
+        modelBuilder.Entity<ExtraClient>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("ExtraClient_pkey");
+            entity.ToTable("ExtraClient");
+
+            // Granting the same account twice is granting it once.
+            entity.HasIndex(e => new { e.ManagerId, e.ClientId }, "ExtraClient_managerId_clientId_key")
+                .IsUnique();
+            entity.HasIndex(e => e.ManagerId, "ExtraClient_managerId_idx");
+            entity.HasIndex(e => e.ClientId, "ExtraClient_clientId_idx");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ManagerId).HasColumnName("managerId");
+            entity.Property(e => e.ClientId).HasColumnName("clientId");
+            entity.Property(e => e.GrantedById).HasColumnName("grantedById");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
+
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.ManagerId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("ExtraClient_managerId_fkey");
+
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.ClientId)
+                .OnDelete(DeleteBehavior.NoAction)
+                .HasConstraintName("ExtraClient_clientId_fkey");
+
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.GrantedById)
+                .OnDelete(DeleteBehavior.NoAction)
+                .HasConstraintName("ExtraClient_grantedById_fkey");
+
+            // Nobody is granted themselves. Their own accounts are the ones
+            // naming them in salesManagerId, which every reach includes —
+            // a row here saying otherwise grants nothing and reads as though
+            // it did.
+            entity.ToTable(t => t.HasCheckConstraint(
+                "ExtraClient_not_self", "\"managerId\" <> \"clientId\""));
+        });
     }
 
     /// <summary>
