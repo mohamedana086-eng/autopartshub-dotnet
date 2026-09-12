@@ -2,8 +2,9 @@ using System.Text.Json;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
-using AutoPartsHub.Domain.Catalogue;
 using AutoPartsHub.Domain;
+using AutoPartsHub.Domain.Catalogue;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -18,26 +19,49 @@ namespace AutoPartsHub.Api.Endpoints;
 public static class BulkLookupEndpoints
 {
     /// <summary>Guards the request against someone pasting a whole catalogue in.</summary>
-    private const int MaxRows = 1000;
+    /// <remarks>
+    /// Two caps, because there are two shapes. <c>partNumbers</c> has answered
+    /// a thousand since it existed and keeps answering a thousand: the figure
+    /// is echoed back as <c>maxRows</c>, and quietly raising it would change
+    /// what an existing caller is told about its own request.
+    ///
+    /// <c>rows</c> is the shape the backlog specifies and takes two thousand,
+    /// which is what it asks for.
+    /// </remarks>
+    private const int MaxPartNumbers = 1000;
+
+    private const int MaxRows = 2000;
+
+    /// <summary>
+    /// The largest body this will read.
+    /// </summary>
+    /// <remarks>
+    /// Two thousand rows of part number and manufacturer is a few hundred
+    /// kilobytes; two megabytes is room for that and the whitespace a
+    /// spreadsheet export brings with it. The limit exists because the row cap
+    /// cannot be applied until the body has been parsed, and parsing is the
+    /// expensive part — a hundred megabytes of JSON is refused before it is
+    /// read rather than after.
+    /// </remarks>
+    private const int MaxBodyBytes = 2 * 1024 * 1024;
 
     public static void MapBulkLookupEndpoints(this IEndpointRouteBuilder app)
     {
         // POST /api/catalog/bulk { partNumbers: string[] }
+        //                       | { rows: [{ partNumber, manufacturer? }] }
+        //
+        // Both shapes are served. `partNumbers` is what the storefront sends
+        // today; `rows` is what the backlog specifies, and it carries a brand
+        // per line — which is what a pasted quotation actually looks like.
         app.MapPost("/api/catalog/bulk", async (
             JsonElement body, AutoPartsContext db, PricingContextLoader pricing,
             HttpContext http, CancellationToken ct) =>
         {
-            if (JsonValues.Get(body, "partNumbers") is not { ValueKind: JsonValueKind.Array } list)
-            {
-                return Results.BadRequest(new { error = "partNumbers must be an array." });
-            }
+            var read = ReadRequest(body);
+            if (!read.Ok) return Results.BadRequest(new { error = read.Error });
 
-            var submitted = list.GetArrayLength();
-            var inputs = list.EnumerateArray()
-                .Select(v => JsonValues.AsString(v).Trim())
-                .Where(v => v.Length > 0)
-                .Take(MaxRows)
-                .ToList();
+            var request = read.Value!;
+            var inputs = request.Rows;
 
             if (inputs.Count == 0)
             {
@@ -47,7 +71,8 @@ public static class BulkLookupEndpoints
             // De-duplicate the lookup while keeping every input row in the
             // answer, so a sheet that lists the same number twice still lines
             // up row for row.
-            var needles = inputs.Select(PartNumbers.Normalise).Where(n => n.Length > 0)
+            var needles = inputs.Select(r => PartNumbers.Normalise(r.PartNumber))
+                .Where(n => n.Length > 0)
                 .Distinct().ToArray();
             if (needles.Length == 0)
             {
@@ -120,29 +145,46 @@ public static class BulkLookupEndpoints
 
             var byId = products.ToDictionary(p => p.Id);
 
-            // A direct hit beats a cross-reference for the same input, so the
-            // cross-references go in first and the direct matches overwrite
-            // them. Among cross-references the first one found wins.
-            var resolved = new Dictionary<string, Resolution>();
-            foreach (var row in viaInterchange)
+            // EVERY candidate per number, not one.
+            //
+            // A part number is not unique across brands — this catalogue has
+            // numbers that normalise onto each other from different makers,
+            // and until now the winner among them was whichever row the
+            // planner returned first. That is fine when nobody said which
+            // brand they meant and indefensible when they did, so the choice
+            // is made per input row below rather than here.
+            //
+            // A direct hit still beats a cross-reference, which is why they
+            // are ordered rather than merged.
+            var resolved = new Dictionary<string, List<Resolution>>();
+
+            void Offer(string norm, Resolution candidate)
             {
-                if (!resolved.ContainsKey(row.Norm))
+                if (!resolved.TryGetValue(norm, out var candidates))
                 {
-                    resolved[row.Norm] = new Resolution(row.Id, "interchange", row.Target);
+                    resolved[norm] = candidates = [];
                 }
+                candidates.Add(candidate);
             }
-            foreach (var row in direct) resolved[row.Norm] = new Resolution(row.Id, "part-number", null);
+
+            foreach (var row in direct) Offer(row.Norm, new Resolution(row.Id, "part-number", null));
+            foreach (var row in viaInterchange) Offer(row.Norm, new Resolution(row.Id, "interchange", row.Target));
 
             var rows = new List<object>(inputs.Count);
             var found = 0;
             var total = 0d;
 
-            foreach (var input in inputs)
+            foreach (var row in inputs)
             {
+                var input = row.PartNumber;
+
                 BulkRow? product = null;
-                if (resolved.TryGetValue(PartNumbers.Normalise(input), out var hit))
+                Resolution? hit = null;
+
+                if (resolved.TryGetValue(PartNumbers.Normalise(input), out var candidates))
                 {
-                    byId.TryGetValue(hit.Id, out product);
+                    hit = Choose(candidates, row.Manufacturer, byId);
+                    if (hit is not null) byId.TryGetValue(hit.Id, out product);
                 }
 
                 if (hit is null || product is null)
@@ -187,18 +229,133 @@ public static class BulkLookupEndpoints
                 tierName = ctx.TierName,
                 isLoggedIn = ctx.IsLoggedIn,
                 submitted = inputs.Count,
-                truncated = submitted > MaxRows,
-                maxRows = MaxRows,
+                truncated = request.Submitted > request.Cap,
+                maxRows = request.Cap,
                 foundCount = found,
                 missingCount = rows.Count - found,
                 total = Math.Round(total * 100, MidpointRounding.AwayFromZero) / 100,
                 rows,
             });
-        });
+        })
+        // Enforced by the server before the body is read, not by the handler
+        // after: the handler runs once the JSON has been parsed, and parsing
+        // is the part a hundred-megabyte paste would cost. The row caps above
+        // bound the WORK; this bounds the READING.
+        .WithMetadata(new RequestSizeLimit(MaxBodyBytes));
+    }
+
+    /// <summary>
+    /// How large a body this endpoint will read.
+    /// </summary>
+    /// <remarks>
+    /// Minimal APIs honour <see cref="IRequestSizeLimitMetadata"/> on an
+    /// endpoint, and the attribute that carries it lives in the MVC package
+    /// this project does not reference. Six lines is cheaper than the
+    /// dependency.
+    /// </remarks>
+    private sealed class RequestSizeLimit(long bytes) : IRequestSizeLimitMetadata
+    {
+        public long? MaxRequestBodySize => bytes;
+
+        /// <summary>False: the limit is the point of declaring it.</summary>
+        public bool DisableRequestSizeLimit => false;
     }
 
     /// <param name="MatchedVia">The cross-referenced number that led here, null on a direct hit.</param>
     private record Resolution(string Id, string MatchedOn, string? MatchedVia);
+
+    /// <summary>One line of the pasted list.</summary>
+    /// <param name="Manufacturer">
+    /// The brand that line named, or null. Only the <c>rows</c> shape can
+    /// carry one; <c>partNumbers</c> is a list of strings and always answers
+    /// null here, which is the same as saying "no preference".
+    /// </param>
+    private record BulkInput(string PartNumber, string? Manufacturer);
+
+    /// <param name="Submitted">How many lines arrived, before the cap.</param>
+    /// <param name="Cap">The limit that applied, which the response echoes.</param>
+    private record BulkRequest(IReadOnlyList<BulkInput> Rows, int Submitted, int Cap);
+
+    /// <summary>
+    /// Reads either shape.
+    /// </summary>
+    /// <remarks>
+    /// <c>rows</c> wins when both are sent, for the reason the search's
+    /// <c>offerType</c> does: a caller sending the newer shape meant it, and
+    /// merging two answers to one question has no defensible result.
+    ///
+    /// A row that is a bare string inside <c>rows</c> is taken as a part
+    /// number with no brand. It costs one line and it is what half the people
+    /// pasting a list will send first.
+    /// </remarks>
+    private static Validated<BulkRequest> ReadRequest(JsonElement body)
+    {
+        if (JsonValues.Get(body, "rows") is { ValueKind: JsonValueKind.Array } rows)
+        {
+            var lines = rows.EnumerateArray()
+                .Select(entry => entry.ValueKind == JsonValueKind.Object
+                    ? new BulkInput(
+                        JsonValues.AsString(JsonValues.Get(entry, "partNumber")).Trim(),
+                        JsonValues.AsString(JsonValues.Get(entry, "manufacturer")).Trim() is { Length: > 0 } m
+                            ? m
+                            : null)
+                    : new BulkInput(JsonValues.AsString(entry).Trim(), null))
+                .Where(r => r.PartNumber.Length > 0)
+                .Take(MaxRows)
+                .ToList();
+
+            return Validation.Ok(new BulkRequest(lines, rows.GetArrayLength(), MaxRows));
+        }
+
+        if (JsonValues.Get(body, "partNumbers") is { ValueKind: JsonValueKind.Array } list)
+        {
+            var lines = list.EnumerateArray()
+                .Select(v => JsonValues.AsString(v).Trim())
+                .Where(v => v.Length > 0)
+                .Take(MaxPartNumbers)
+                .Select(v => new BulkInput(v, null))
+                .ToList();
+
+            return Validation.Ok(new BulkRequest(lines, list.GetArrayLength(), MaxPartNumbers));
+        }
+
+        return Validation.Fail<BulkRequest>("partNumbers must be an array.");
+    }
+
+    /// <summary>
+    /// Which of several parts carrying the same number the line meant.
+    /// </summary>
+    /// <remarks>
+    /// The order is: the brand they named, then anything. Within each, a
+    /// direct hit beats a cross-reference — which is the rule that was already
+    /// here, applied after the brand rather than instead of it.
+    ///
+    /// An unrecognised brand falls through to "anything" rather than reporting
+    /// the line as not carried. A customer whose spreadsheet says "Bosch Gmbh"
+    /// against a number this catalogue does stock is better served the part
+    /// than the empty row, and the row still says which brand was returned so
+    /// they can see it was not the one they typed.
+    ///
+    /// Compared loosely, because the brand is whatever a spreadsheet had in
+    /// it: case and the separators a name picks up on its way through Excel
+    /// are ignored, the same way a part number's are.
+    /// </remarks>
+    private static Resolution? Choose(
+        List<Resolution> candidates, string? manufacturer, Dictionary<string, BulkRow> byId)
+    {
+        if (manufacturer is not null)
+        {
+            var wanted = PartNumbers.Normalise(manufacturer);
+
+            var preferred = candidates.FirstOrDefault(c =>
+                byId.TryGetValue(c.Id, out var product)
+                && PartNumbers.Normalise(product.ManufacturerName) == wanted);
+
+            if (preferred is not null) return preferred;
+        }
+
+        return candidates.FirstOrDefault(c => byId.ContainsKey(c.Id));
+    }
 }
 
 public record NormalisedMatch(string Id, string Norm);

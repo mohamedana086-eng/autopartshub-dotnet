@@ -69,7 +69,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires — two left
+## The nine differences the backlog requires — one left
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -81,14 +81,14 @@ each has to be settled before the screen is built rather than after.
 | Supplier sign-up | ~~`POST /api/suppliers/register`~~ — both served | `POST /api/auth/register-supplier` ✅ |
 | Failed searches | ~~`GET /api/admin/search-misses`~~ — both served | `GET /api/admin/failed-searches` + `resolve` / `reopen` ✅ |
 | Cart write | ~~`PUT /api/cart`~~ — both served | `POST` / `PATCH` / `DELETE /api/cart/lines` ✅ |
-| Bulk body | `partNumbers[]`, 1000 rows | `rows[]` with a manufacturer per row, 2000 rows, 2 MB |
+| Bulk body | ~~`partNumbers[]`, 1000 rows~~ — both served | `rows[]` with a manufacturer per row, 2000 rows, 2 MB ✅ |
 | Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
 | Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products` — `GET manager/scope` ✅ |
 | Ticket status | `PATCH /api/admin/tickets/{id}` | `PATCH /api/tickets/{id}/status` + `PUT following` |
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | ~~`partType`~~ — both served | `offerType`, kept separate from `matchIn` ✅ |
 
-Six rows have moved, and all in the same way: the new shape is served and the
+Seven rows have moved, and all in the same way: the new shape is served and the
 old one still is, so the caller changes when it changes.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
@@ -109,6 +109,26 @@ status: doing it through the move would write `statusChangedAt` and
 `statusChangedById` for a change that did not happen. It sends no email — the
 customer was told when it shipped, and a second message with the same subject
 and a different number reads as a second shipment.
+
+`POST /api/catalog/bulk` takes `rows[]` beside `partNumbers[]`, and the
+brand on a row is the interesting half. A part number is not unique across
+brands once separators are dropped — `ZZ-COLLIDE-1` and `ZZCOLLIDE1` are two
+rows in a table whose part number is unique and one number to a customer — and
+until now the winner among them was whichever row the planner returned first.
+A line that names a brand now gets that brand's part, and a line that does not
+gets what it always got.
+
+An unrecognised brand still returns a part rather than an empty row: a
+customer whose spreadsheet says "Bosch Gmbh" against a number we do stock is
+better served the part, and the row says which brand came back so they can see
+it was not the one they typed.
+
+Two caps, because there are two shapes. `partNumbers` keeps its thousand —
+the figure is echoed back as `maxRows`, and quietly raising it would change
+what an existing caller is told about its own request — and `rows` takes the
+two thousand the backlog asks for. The 2 MB limit is enforced by the server
+before the body is parsed rather than by the handler after: the row caps bound
+the work, and this bounds the reading.
 
 `GET /api/admin/failed-searches` is a new route rather than a changed one for
 a reason worth stating: crossing a term off means naming the row, and the old
@@ -322,7 +342,7 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `POST` | `/api/cart/lines` | Endpoints/CartEndpoints.cs:139 | _none_ |
 | `DELETE` | `/api/cart/lines/{productId}` | Endpoints/CartEndpoints.cs:188 | _none_ |
 | `PATCH` | `/api/cart/lines/{productId}` | Endpoints/CartEndpoints.cs:164 | _none_ |
-| `POST` | `/api/catalog/bulk` | Endpoints/BulkLookupEndpoints.cs:26 | pages/bulk.page.ts:258 |
+| `POST` | `/api/catalog/bulk` | Endpoints/BulkLookupEndpoints.cs:56 | pages/bulk.page.ts:258 |
 | `GET` | `/api/catalog/products/{id}` | Endpoints/ProductEndpoints.cs:13 | core/catalog.service.ts:67 |
 | `GET` | `/api/catalog/search` | Endpoints/SearchEndpoints.cs:58 | core/catalog.service.ts:53 |
 | `GET` | `/api/notifications` | Endpoints/NotificationEndpoints.cs:16 | core/notifications.service.ts:45 |
