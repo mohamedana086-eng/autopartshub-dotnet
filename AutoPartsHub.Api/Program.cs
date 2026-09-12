@@ -218,6 +218,7 @@ app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
 app.MapAccountRecoveryEndpoints();
 app.MapManagerScopeEndpoints();
+app.MapFailedSearchEndpoints();
 app.MapProductEndpoints();
 app.MapSearchEndpoints();
 app.MapGoodsCategoryEndpoints();

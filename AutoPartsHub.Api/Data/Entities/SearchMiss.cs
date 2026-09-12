@@ -25,4 +25,18 @@ public partial class SearchMiss
     public DateTime FirstSeenAt { get; set; }
 
     public DateTime LastSeenAt { get; set; }
+
+    /// <summary>When somebody crossed it off, or null while it is open.</summary>
+    /// <remarks>
+    /// Set with <see cref="ResolvedById"/> and cleared with it — a date with
+    /// no decider is half a record of a decision, and the database says so.
+    ///
+    /// Nothing reopens itself: a resolved term searched again keeps climbing
+    /// and stays resolved. Resolving is a judgement, and a machine undoing one
+    /// because the case recurred would make "we are not going to sell this"
+    /// impossible to say once. The screen shows both dates instead.
+    /// </remarks>
+    public DateTime? ResolvedAt { get; set; }
+
+    public string? ResolvedById { get; set; }
 }

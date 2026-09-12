@@ -69,7 +69,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires — three left
+## The nine differences the backlog requires — two left
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -79,7 +79,7 @@ each has to be settled before the screen is built rather than after.
 | Area | Today | The backlog asks for |
 |---|---|---|
 | Supplier sign-up | ~~`POST /api/suppliers/register`~~ — both served | `POST /api/auth/register-supplier` ✅ |
-| Failed searches | `GET /api/admin/search-misses` | `GET /api/admin/failed-searches` + `resolve` / `reopen` |
+| Failed searches | ~~`GET /api/admin/search-misses`~~ — both served | `GET /api/admin/failed-searches` + `resolve` / `reopen` ✅ |
 | Cart write | ~~`PUT /api/cart`~~ — both served | `POST` / `PATCH` / `DELETE /api/cart/lines` ✅ |
 | Bulk body | `partNumbers[]`, 1000 rows | `rows[]` with a manufacturer per row, 2000 rows, 2 MB |
 | Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
@@ -88,7 +88,7 @@ each has to be settled before the screen is built rather than after.
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | ~~`partType`~~ — both served | `offerType`, kept separate from `matchIn` ✅ |
 
-Five rows have moved, and all in the same way: the new shape is served and the
+Six rows have moved, and all in the same way: the new shape is served and the
 old one still is, so the caller changes when it changes.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
@@ -109,6 +109,25 @@ status: doing it through the move would write `statusChangedAt` and
 `statusChangedById` for a change that did not happen. It sends no email — the
 customer was told when it shipped, and a second message with the same subject
 and a different number reads as a second shipment.
+
+`GET /api/admin/failed-searches` is a new route rather than a changed one for
+a reason worth stating: crossing a term off means naming the row, and the old
+response carries no id — it is keyed by term and whether a filter was on.
+Adding an id to it would be a change to a response both APIs serve, which is
+two repositories and a check that cannot currently run. A new route is free to
+carry the id, the resolution and the dates, because nothing reads it yet.
+
+The report is RequireStaff, as it always was; `resolve` and `reopen` are
+RequireAdmin. Reading which parts are being asked for is everybody's job, and
+deciding one has been dealt with is a buying decision — and the row carries no
+customer for a salesperson's scope to narrow, so RequireOperator would be a
+write opened to sales with nothing scoping it, which is the shape
+`AdminWriteScopeTests` refuses.
+
+Nothing reopens itself. A resolved term searched again keeps climbing and stays
+resolved, and `seenSinceResolved` says so — resolving is a judgement, and a
+machine undoing one because the case recurred would make "we are not going to
+sell this" impossible to say once.
 
 `offerType` is the first change to a RESPONSE rather than an addition of a
 route, and it had to be made in both APIs at once — `compare.mjs` diffs their
@@ -228,6 +247,9 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `POST` | `/api/admin/currencies` | Endpoints/AdminPricingWriteEndpoints.cs:30 | core/admin.service.ts:43 |
 | `DELETE` | `/api/admin/currencies/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:102 | core/admin.service.ts:53 |
 | `PATCH` | `/api/admin/currencies/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:57 | core/admin.service.ts:48 |
+| `GET` | `/api/admin/failed-searches` | Endpoints/FailedSearchEndpoints.cs:57 | _none_ |
+| `POST` | `/api/admin/failed-searches/{id}/reopen` | Endpoints/FailedSearchEndpoints.cs:153 | _none_ |
+| `POST` | `/api/admin/failed-searches/{id}/resolve` | Endpoints/FailedSearchEndpoints.cs:143 | _none_ |
 | `GET` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:28 | core/admin.service.ts:60 |
 | `POST` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:38 | core/admin.service.ts:66 |
 | `DELETE` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:108 | core/admin.service.ts:78 |

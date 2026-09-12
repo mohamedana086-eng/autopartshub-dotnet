@@ -446,6 +446,12 @@ public partial class AutoPartsContext
             // rows — see the property.
             entity.HasIndex(e => new { e.Term, e.Narrowed }, "SearchMiss_term_narrowed_key").IsUnique();
             entity.HasIndex(e => e.LastSeenAt, "SearchMiss_lastSeenAt_idx");
+            // The report's own filter: the open ones, most-searched first.
+            // Filtered, so it indexes what the default screen reads and stays
+            // small as the resolved pile grows.
+            entity.HasIndex(e => e.Searches, "SearchMiss_open_idx")
+                .IsDescending()
+                .HasFilter("\"resolvedAt\" IS NULL");
             // Missed beside it. The admin report reads this table twice —
             // what was searched for most, and what was searched for last —
             // and only one of the two had an index.
@@ -459,6 +465,30 @@ public partial class AutoPartsContext
                 .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("firstSeenAt");
             entity.Property(e => e.LastSeenAt)
                 .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("lastSeenAt");
+            entity.Property(e => e.ResolvedAt).HasPrecision(3).HasColumnName("resolvedAt");
+            entity.Property(e => e.ResolvedById).HasColumnName("resolvedById");
+
+            // Who crossed it off, while they are still here. The decision
+            // outlives the person who made it, so the delete clears the column
+            // rather than taking the row — losing a resolution because
+            // somebody left would quietly refill the buying report with things
+            // already handled.
+            //
+            // The only relation to Client on this table, so SET NULL is
+            // available: the one-action-per-pair rule that forced NO ACTION on
+            // ManagerAccess and ExtraClient does not bite here.
+            //
+            // THERE IS NO CHECK PAIRING resolvedAt WITH resolvedById, and one
+            // was written first. "A date with no decider is half a record of a
+            // decision" sounds right and is wrong — SET NULL produces exactly
+            // that state, deliberately, the moment an admin leaves. The
+            // constraint and the foreign key contradicted each other and the
+            // database said so: the DELETE was refused. A resolution whose
+            // author is gone is a whole record of a decision somebody made.
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.ResolvedById)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("SearchMiss_resolvedById_fkey");
         });
 
         modelBuilder.Entity<SupplierOffer>(entity =>
