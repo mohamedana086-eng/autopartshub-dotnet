@@ -28,22 +28,45 @@ this file is checked by running the generator and looking at the diff.
 
 ## The count
 
-96 routes. Four are called by the storefront and answered by nothing. One is
-answered and not yet called — `POST /api/auth/register-supplier`, which is the
-first step of the move described below.
+96 routes. **Every route the storefront calls is answered.** One is answered
+and not yet called — `POST /api/auth/register-supplier`, which is the first
+step of the move described below.
 
-## What the storefront asks for and nothing answers
+## ~~What the storefront asks for and nothing answers~~ — closed (T-196)
 
-| Verb | Path | Called from | Backlog task |
-|---|---|---|---|
-| `POST` | `/api/auth/password/forgot` | `pages/forgot-password.page.ts:80` | T-196 |
-| `POST` | `/api/auth/password/reset` | `pages/reset-password.page.ts:101` | T-196 |
-| `POST` | `/api/auth/email/confirm` | `pages/confirm-email.page.ts:59` | T-196 |
-| `POST` | `/api/auth/email/resend` | `shell/confirm-email-banner.ts:67` | T-196 |
+Four routes used to be here, and they were the only place the storefront could
+reach a 404 by using the app normally:
 
-All four are account recovery and address verification. The screens exist and
-are wired; the handlers were never ported. `README.md` says as much. They are
-the only place the storefront can reach a 404 by using the app normally.
+| Verb | Path | Called from |
+|---|---|---|
+| `POST` | `/api/auth/password/forgot` | `pages/forgot-password.page.ts` |
+| `POST` | `/api/auth/password/reset` | `pages/reset-password.page.ts` |
+| `POST` | `/api/auth/email/confirm` | `pages/confirm-email.page.ts` |
+| `POST` | `/api/auth/email/resend` | `shell/confirm-email-banner.ts` |
+
+All four are account recovery and address verification: the screens existed and
+were wired, and the handlers had never been ported. They are in
+`Endpoints/AccountRecoveryEndpoints.cs` now, over the shared token mechanism in
+`Auth/VerificationTokens.cs`.
+
+Registration sends a confirmation link again as well, which the port had also
+dropped — without it the banner asking somebody to confirm their address had
+nothing to confirm until they pressed "send it again".
+
+**Two things in that flow are a contract rather than a preference**, because
+both APIs read one `VerificationToken` table and only the hash of a token is
+stored:
+
+- the token encoding — base64url, unpadded, 43 characters — and the hash,
+  SHA-256 as lowercase hex. A link mailed by one API is redeemed by whichever
+  one the customer's click reaches, and a token hashed with .NET's uppercase
+  hex would be refused as invalid while being perfectly valid;
+- the word "link" in every refusal about a token, which
+  `pages/reset-password.page.ts` matches with `/link/i` to decide whether to
+  offer a fresh one.
+
+Both are asserted — `VerificationTokenFormatTests` against values produced by
+the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
 ## The nine differences the backlog requires
 
@@ -119,99 +142,99 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 
 | Verb | Path | Handler | Called from |
 |---|---|---|---|
-| `GET` | `/api/admin/carts` | Endpoints/AdminDeskEndpoints.cs:351 | core/admin.service.ts:346 |
-| `GET` | `/api/admin/client-categories` | Endpoints/AdminReferenceEndpoints.cs:142 | core/admin.service.ts:83 |
-| `POST` | `/api/admin/client-categories` | Endpoints/AdminPricingWriteEndpoints.cs:143 | core/admin.service.ts:90 |
-| `DELETE` | `/api/admin/client-categories/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:185 | core/admin.service.ts:95 |
-| `GET` | `/api/admin/clients` | Endpoints/AdminReferenceEndpoints.cs:336 | core/admin.service.ts:31 |
-| `PATCH` | `/api/admin/clients/{id}` | Endpoints/AdminDeskWriteEndpoints.cs:24 | core/admin.service.ts:35 |
-| `GET` | `/api/admin/currencies` | Endpoints/AdminReferenceEndpoints.cs:120 | core/admin.service.ts:39 |
-| `POST` | `/api/admin/currencies` | Endpoints/AdminPricingWriteEndpoints.cs:27 | core/admin.service.ts:43 |
-| `DELETE` | `/api/admin/currencies/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:99 | core/admin.service.ts:53 |
-| `PATCH` | `/api/admin/currencies/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:54 | core/admin.service.ts:48 |
-| `GET` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:26 | core/admin.service.ts:60 |
-| `POST` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:36 | core/admin.service.ts:66 |
-| `DELETE` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:106 | core/admin.service.ts:78 |
-| `PATCH` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:66 | core/admin.service.ts:72 |
-| `GET` | `/api/admin/markup-rules` | Endpoints/AdminReferenceEndpoints.cs:169 | core/admin.service.ts:99 |
-| `POST` | `/api/admin/markup-rules` | Endpoints/AdminPricingWriteEndpoints.cs:228 | core/admin.service.ts:103 |
-| `DELETE` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:346 | core/admin.service.ts:139 |
-| `PATCH` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:321 | core/admin.service.ts:134 |
-| `PUT` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:300 | core/admin.service.ts:128 |
-| `POST` | `/api/admin/markup-rules/ladder` | Endpoints/AdminPricingWriteEndpoints.cs:257 | core/admin.service.ts:115 |
+| `GET` | `/api/admin/carts` | Endpoints/AdminDeskEndpoints.cs:352 | core/admin.service.ts:346 |
+| `GET` | `/api/admin/client-categories` | Endpoints/AdminReferenceEndpoints.cs:143 | core/admin.service.ts:83 |
+| `POST` | `/api/admin/client-categories` | Endpoints/AdminPricingWriteEndpoints.cs:146 | core/admin.service.ts:90 |
+| `DELETE` | `/api/admin/client-categories/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:188 | core/admin.service.ts:95 |
+| `GET` | `/api/admin/clients` | Endpoints/AdminReferenceEndpoints.cs:337 | core/admin.service.ts:31 |
+| `PATCH` | `/api/admin/clients/{id}` | Endpoints/AdminDeskWriteEndpoints.cs:26 | core/admin.service.ts:35 |
+| `GET` | `/api/admin/currencies` | Endpoints/AdminReferenceEndpoints.cs:121 | core/admin.service.ts:39 |
+| `POST` | `/api/admin/currencies` | Endpoints/AdminPricingWriteEndpoints.cs:30 | core/admin.service.ts:43 |
+| `DELETE` | `/api/admin/currencies/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:102 | core/admin.service.ts:53 |
+| `PATCH` | `/api/admin/currencies/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:57 | core/admin.service.ts:48 |
+| `GET` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:28 | core/admin.service.ts:60 |
+| `POST` | `/api/admin/goods-categories` | Endpoints/GoodsCategoryEndpoints.cs:38 | core/admin.service.ts:66 |
+| `DELETE` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:108 | core/admin.service.ts:78 |
+| `PATCH` | `/api/admin/goods-categories/{id}` | Endpoints/GoodsCategoryEndpoints.cs:68 | core/admin.service.ts:72 |
+| `GET` | `/api/admin/markup-rules` | Endpoints/AdminReferenceEndpoints.cs:170 | core/admin.service.ts:99 |
+| `POST` | `/api/admin/markup-rules` | Endpoints/AdminPricingWriteEndpoints.cs:231 | core/admin.service.ts:103 |
+| `DELETE` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:349 | core/admin.service.ts:139 |
+| `PATCH` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:324 | core/admin.service.ts:134 |
+| `PUT` | `/api/admin/markup-rules/{id}` | Endpoints/AdminPricingWriteEndpoints.cs:303 | core/admin.service.ts:128 |
+| `POST` | `/api/admin/markup-rules/ladder` | Endpoints/AdminPricingWriteEndpoints.cs:260 | core/admin.service.ts:115 |
 | `GET` | `/api/admin/notifications` | Endpoints/AdminDeskEndpoints.cs:446 | core/admin.service.ts:487 |
-| `POST` | `/api/admin/notifications` | Endpoints/AdminDeskWriteEndpoints.cs:109 | core/admin.service.ts:492 |
-| `GET` | `/api/admin/orders` | Endpoints/AdminDeskEndpoints.cs:208 | core/admin.service.ts:156 |
-| `PATCH` | `/api/admin/orders/{id}` | Endpoints/AdminOrderWriteEndpoints.cs:36 | core/admin.service.ts:168 |
-| `GET` | `/api/admin/orders/{id}/suppliers` | Endpoints/AdminDeskEndpoints.cs:89 | core/admin.service.ts:179 |
-| `GET` | `/api/admin/outlets` | Endpoints/AdminReferenceEndpoints.cs:91 | core/admin.service.ts:326 |
-| `POST` | `/api/admin/outlets` | Endpoints/AdminSiteWriteEndpoints.cs:290 | core/admin.service.ts:330 |
-| `DELETE` | `/api/admin/outlets/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:356 | core/admin.service.ts:340 |
-| `PATCH` | `/api/admin/outlets/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:320 | core/admin.service.ts:335 |
-| `GET` | `/api/admin/price-lists` | Endpoints/AdminReferenceEndpoints.cs:191 | core/admin.service.ts:352 |
-| `POST` | `/api/admin/price-lists` | Endpoints/AdminPriceListWriteEndpoints.cs:34 | core/admin.service.ts:440 |
-| `DELETE` | `/api/admin/price-lists/{id}` | Endpoints/AdminPriceListWriteEndpoints.cs:334 | core/admin.service.ts:481 |
-| `GET` | `/api/admin/price-lists/{id}` | Endpoints/AdminReferenceEndpoints.cs:291 | core/admin.service.ts:364 |
-| `PATCH` | `/api/admin/price-lists/{id}` | Endpoints/AdminPriceListWriteEndpoints.cs:221 | core/admin.service.ts:456 |
-| `PATCH` | `/api/admin/price-lists/{id}/items/{productId}` | Endpoints/AdminPriceListWriteEndpoints.cs:284 | core/admin.service.ts:474 |
-| `GET` | `/api/admin/price-lists/imports` | Endpoints/AdminReferenceEndpoints.cs:209 | core/admin.service.ts:424 |
-| `GET` | `/api/admin/price-lists/imports/{importId}` | Endpoints/AdminReferenceEndpoints.cs:240 | core/admin.service.ts:434 |
-| `GET` | `/api/admin/products` | Endpoints/AdminCatalogueWriteEndpoints.cs:33 | core/admin.service.ts:184 |
-| `POST` | `/api/admin/products` | Endpoints/AdminCatalogueWriteEndpoints.cs:109 | core/admin.service.ts:188 |
-| `DELETE` | `/api/admin/products/{id}` | Endpoints/AdminCatalogueWriteEndpoints.cs:196 | core/admin.service.ts:198 |
-| `PATCH` | `/api/admin/products/{id}` | Endpoints/AdminCatalogueWriteEndpoints.cs:149 | core/admin.service.ts:193 |
-| `GET` | `/api/admin/products/{id}/images` | Endpoints/AdminCatalogueWriteEndpoints.cs:235 | core/admin.service.ts:244 |
-| `PUT` | `/api/admin/products/{id}/images` | Endpoints/AdminCatalogueWriteEndpoints.cs:249 | core/admin.service.ts:251 |
-| `GET` | `/api/admin/products/{id}/offers` | Endpoints/AdminOfferEndpoints.cs:28 | core/admin.service.ts:275 |
-| `PUT` | `/api/admin/products/{id}/offers` | Endpoints/AdminOfferEndpoints.cs:52 | core/admin.service.ts:293 |
-| `GET` | `/api/admin/products/{id}/stock` | Endpoints/AdminCatalogueWriteEndpoints.cs:285 | core/admin.service.ts:259 |
-| `PUT` | `/api/admin/products/{id}/stock` | Endpoints/AdminCatalogueWriteEndpoints.cs:299 | core/admin.service.ts:266 |
-| `GET` | `/api/admin/search-misses` | Endpoints/AdminDeskEndpoints.cs:156 | core/admin.service.ts:414 |
-| `GET` | `/api/admin/stats` | Endpoints/AdminDeskEndpoints.cs:32 | core/admin.service.ts:27 |
-| `GET` | `/api/admin/suppliers` | Endpoints/AdminReferenceEndpoints.cs:25 | core/admin.service.ts:202 |
-| `POST` | `/api/admin/suppliers` | Endpoints/AdminSiteWriteEndpoints.cs:27 | core/admin.service.ts:206 |
-| `DELETE` | `/api/admin/suppliers/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:150 | core/admin.service.ts:237 |
-| `PATCH` | `/api/admin/suppliers/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:65 | core/admin.service.ts:211<br>core/admin.service.ts:222<br>core/admin.service.ts:232 |
-| `PATCH` | `/api/admin/suppliers/{id}/approval` | Endpoints/SupplierSignupEndpoints.cs:238 | core/admin.service.ts:518 |
-| `GET` | `/api/admin/suppliers/waiting` | Endpoints/SupplierSignupEndpoints.cs:192 | core/admin.service.ts:500 |
-| `GET` | `/api/admin/tickets` | Endpoints/TicketEndpoints.cs:172 | core/admin.service.ts:376 |
-| `GET` | `/api/admin/tickets/{id}` | Endpoints/TicketEndpoints.cs:231 | core/admin.service.ts:381 |
-| `PATCH` | `/api/admin/tickets/{id}` | Endpoints/TicketEndpoints.cs:263 | core/admin.service.ts:400 |
-| `POST` | `/api/admin/tickets/{id}/messages` | Endpoints/TicketEndpoints.cs:289 | core/admin.service.ts:393 |
-| `GET` | `/api/admin/warehouses` | Endpoints/AdminReferenceEndpoints.cs:60 | core/admin.service.ts:302 |
-| `POST` | `/api/admin/warehouses` | Endpoints/AdminSiteWriteEndpoints.cs:190 | core/admin.service.ts:307 |
-| `DELETE` | `/api/admin/warehouses/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:245 | core/admin.service.ts:319 |
-| `PATCH` | `/api/admin/warehouses/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:214 | core/admin.service.ts:313 |
-| `POST` | `/api/auth/email/confirm` | **absent** | pages/confirm-email.page.ts:59 |
-| `POST` | `/api/auth/email/resend` | **absent** | shell/confirm-email-banner.ts:67 |
-| `POST` | `/api/auth/login` | Endpoints/AuthEndpoints.cs:13 | core/auth.service.ts:57 |
-| `POST` | `/api/auth/logout` | Endpoints/AuthEndpoints.cs:116 | core/auth.service.ts:72 |
-| `POST` | `/api/auth/password/forgot` | **absent** | pages/forgot-password.page.ts:80 |
-| `POST` | `/api/auth/password/reset` | **absent** | pages/reset-password.page.ts:101 |
-| `POST` | `/api/auth/register` | Endpoints/AuthEndpoints.cs:56 | core/auth.service.ts:65 |
-| `POST` | `/api/auth/register-supplier` | Endpoints/SupplierSignupEndpoints.cs:45 | _none_ |
-| `GET` | `/api/auth/session` | Endpoints/AuthEndpoints.cs:127 | core/auth.service.ts:46 |
-| `GET` | `/api/cart` | Endpoints/CartEndpoints.cs:30 | core/cart.service.ts:260 |
-| `PUT` | `/api/cart` | Endpoints/CartEndpoints.cs:47 | core/cart.service.ts:235 |
-| `POST` | `/api/catalog/bulk` | Endpoints/BulkLookupEndpoints.cs:24 | pages/bulk.page.ts:258 |
+| `POST` | `/api/admin/notifications` | Endpoints/AdminDeskWriteEndpoints.cs:111 | core/admin.service.ts:492 |
+| `GET` | `/api/admin/orders` | Endpoints/AdminDeskEndpoints.cs:209 | core/admin.service.ts:156 |
+| `PATCH` | `/api/admin/orders/{id}` | Endpoints/AdminOrderWriteEndpoints.cs:35 | core/admin.service.ts:168 |
+| `GET` | `/api/admin/orders/{id}/suppliers` | Endpoints/AdminDeskEndpoints.cs:90 | core/admin.service.ts:179 |
+| `GET` | `/api/admin/outlets` | Endpoints/AdminReferenceEndpoints.cs:92 | core/admin.service.ts:326 |
+| `POST` | `/api/admin/outlets` | Endpoints/AdminSiteWriteEndpoints.cs:293 | core/admin.service.ts:330 |
+| `DELETE` | `/api/admin/outlets/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:359 | core/admin.service.ts:340 |
+| `PATCH` | `/api/admin/outlets/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:323 | core/admin.service.ts:335 |
+| `GET` | `/api/admin/price-lists` | Endpoints/AdminReferenceEndpoints.cs:192 | core/admin.service.ts:352 |
+| `POST` | `/api/admin/price-lists` | Endpoints/AdminPriceListWriteEndpoints.cs:37 | core/admin.service.ts:440 |
+| `DELETE` | `/api/admin/price-lists/{id}` | Endpoints/AdminPriceListWriteEndpoints.cs:337 | core/admin.service.ts:481 |
+| `GET` | `/api/admin/price-lists/{id}` | Endpoints/AdminReferenceEndpoints.cs:292 | core/admin.service.ts:364 |
+| `PATCH` | `/api/admin/price-lists/{id}` | Endpoints/AdminPriceListWriteEndpoints.cs:224 | core/admin.service.ts:456 |
+| `PATCH` | `/api/admin/price-lists/{id}/items/{productId}` | Endpoints/AdminPriceListWriteEndpoints.cs:287 | core/admin.service.ts:474 |
+| `GET` | `/api/admin/price-lists/imports` | Endpoints/AdminReferenceEndpoints.cs:210 | core/admin.service.ts:424 |
+| `GET` | `/api/admin/price-lists/imports/{importId}` | Endpoints/AdminReferenceEndpoints.cs:241 | core/admin.service.ts:434 |
+| `GET` | `/api/admin/products` | Endpoints/AdminCatalogueWriteEndpoints.cs:34 | core/admin.service.ts:184 |
+| `POST` | `/api/admin/products` | Endpoints/AdminCatalogueWriteEndpoints.cs:110 | core/admin.service.ts:188 |
+| `DELETE` | `/api/admin/products/{id}` | Endpoints/AdminCatalogueWriteEndpoints.cs:197 | core/admin.service.ts:198 |
+| `PATCH` | `/api/admin/products/{id}` | Endpoints/AdminCatalogueWriteEndpoints.cs:150 | core/admin.service.ts:193 |
+| `GET` | `/api/admin/products/{id}/images` | Endpoints/AdminCatalogueWriteEndpoints.cs:236 | core/admin.service.ts:244 |
+| `PUT` | `/api/admin/products/{id}/images` | Endpoints/AdminCatalogueWriteEndpoints.cs:250 | core/admin.service.ts:251 |
+| `GET` | `/api/admin/products/{id}/offers` | Endpoints/AdminOfferEndpoints.cs:29 | core/admin.service.ts:275 |
+| `PUT` | `/api/admin/products/{id}/offers` | Endpoints/AdminOfferEndpoints.cs:53 | core/admin.service.ts:293 |
+| `GET` | `/api/admin/products/{id}/stock` | Endpoints/AdminCatalogueWriteEndpoints.cs:286 | core/admin.service.ts:259 |
+| `PUT` | `/api/admin/products/{id}/stock` | Endpoints/AdminCatalogueWriteEndpoints.cs:300 | core/admin.service.ts:266 |
+| `GET` | `/api/admin/search-misses` | Endpoints/AdminDeskEndpoints.cs:157 | core/admin.service.ts:414 |
+| `GET` | `/api/admin/stats` | Endpoints/AdminDeskEndpoints.cs:33 | core/admin.service.ts:27 |
+| `GET` | `/api/admin/suppliers` | Endpoints/AdminReferenceEndpoints.cs:26 | core/admin.service.ts:202 |
+| `POST` | `/api/admin/suppliers` | Endpoints/AdminSiteWriteEndpoints.cs:30 | core/admin.service.ts:206 |
+| `DELETE` | `/api/admin/suppliers/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:153 | core/admin.service.ts:237 |
+| `PATCH` | `/api/admin/suppliers/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:68 | core/admin.service.ts:211<br>core/admin.service.ts:222<br>core/admin.service.ts:232 |
+| `PATCH` | `/api/admin/suppliers/{id}/approval` | Endpoints/SupplierSignupEndpoints.cs:250 | core/admin.service.ts:518 |
+| `GET` | `/api/admin/suppliers/waiting` | Endpoints/SupplierSignupEndpoints.cs:194 | core/admin.service.ts:500 |
+| `GET` | `/api/admin/tickets` | Endpoints/TicketEndpoints.cs:171 | core/admin.service.ts:376 |
+| `GET` | `/api/admin/tickets/{id}` | Endpoints/TicketEndpoints.cs:230 | core/admin.service.ts:381 |
+| `PATCH` | `/api/admin/tickets/{id}` | Endpoints/TicketEndpoints.cs:262 | core/admin.service.ts:400 |
+| `POST` | `/api/admin/tickets/{id}/messages` | Endpoints/TicketEndpoints.cs:288 | core/admin.service.ts:393 |
+| `GET` | `/api/admin/warehouses` | Endpoints/AdminReferenceEndpoints.cs:61 | core/admin.service.ts:302 |
+| `POST` | `/api/admin/warehouses` | Endpoints/AdminSiteWriteEndpoints.cs:193 | core/admin.service.ts:307 |
+| `DELETE` | `/api/admin/warehouses/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:248 | core/admin.service.ts:319 |
+| `PATCH` | `/api/admin/warehouses/{id}` | Endpoints/AdminSiteWriteEndpoints.cs:217 | core/admin.service.ts:313 |
+| `POST` | `/api/auth/email/confirm` | Endpoints/AccountRecoveryEndpoints.cs:148 | pages/confirm-email.page.ts:59 |
+| `POST` | `/api/auth/email/resend` | Endpoints/AccountRecoveryEndpoints.cs:195 | shell/confirm-email-banner.ts:67 |
+| `POST` | `/api/auth/login` | Endpoints/AuthEndpoints.cs:16 | core/auth.service.ts:57 |
+| `POST` | `/api/auth/logout` | Endpoints/AuthEndpoints.cs:137 | core/auth.service.ts:72 |
+| `POST` | `/api/auth/password/forgot` | Endpoints/AccountRecoveryEndpoints.cs:38 | pages/forgot-password.page.ts:80 |
+| `POST` | `/api/auth/password/reset` | Endpoints/AccountRecoveryEndpoints.cs:90 | pages/reset-password.page.ts:101 |
+| `POST` | `/api/auth/register` | Endpoints/AuthEndpoints.cs:59 | core/auth.service.ts:65 |
+| `POST` | `/api/auth/register-supplier` | Endpoints/SupplierSignupEndpoints.cs:47 | _none_ |
+| `GET` | `/api/auth/session` | Endpoints/AuthEndpoints.cs:148 | core/auth.service.ts:46 |
+| `GET` | `/api/cart` | Endpoints/CartEndpoints.cs:32 | core/cart.service.ts:260 |
+| `PUT` | `/api/cart` | Endpoints/CartEndpoints.cs:49 | core/cart.service.ts:235 |
+| `POST` | `/api/catalog/bulk` | Endpoints/BulkLookupEndpoints.cs:26 | pages/bulk.page.ts:258 |
 | `GET` | `/api/catalog/products/{id}` | Endpoints/ProductEndpoints.cs:13 | core/catalog.service.ts:67 |
-| `GET` | `/api/catalog/search` | Endpoints/SearchEndpoints.cs:57 | core/catalog.service.ts:53 |
+| `GET` | `/api/catalog/search` | Endpoints/SearchEndpoints.cs:58 | core/catalog.service.ts:53 |
 | `GET` | `/api/notifications` | Endpoints/NotificationEndpoints.cs:16 | core/notifications.service.ts:45 |
 | `POST` | `/api/notifications` | Endpoints/NotificationEndpoints.cs:55 | core/notifications.service.ts:83 |
 | `PATCH` | `/api/notifications/{id}` | Endpoints/NotificationEndpoints.cs:77 | core/notifications.service.ts:70 |
-| `GET` | `/api/orders` | Endpoints/OrderEndpoints.cs:19 | core/orders.service.ts:41 |
-| `POST` | `/api/orders` | Endpoints/OrderEndpoints.cs:94 | core/orders.service.ts:37 |
-| `GET` | `/api/supplier/orders` | Endpoints/SupplierPortalEndpoints.cs:108 | core/supplier.service.ts:67 |
-| `GET` | `/api/supplier/stock` | Endpoints/SupplierPortalEndpoints.cs:162 | core/supplier.service.ts:73 |
-| `GET` | `/api/supplier/summary` | Endpoints/SupplierPortalEndpoints.cs:61 | core/supplier.service.ts:61 |
+| `GET` | `/api/orders` | Endpoints/OrderEndpoints.cs:20 | core/orders.service.ts:41 |
+| `POST` | `/api/orders` | Endpoints/OrderEndpoints.cs:95 | core/orders.service.ts:37 |
+| `GET` | `/api/supplier/orders` | Endpoints/SupplierPortalEndpoints.cs:109 | core/supplier.service.ts:67 |
+| `GET` | `/api/supplier/stock` | Endpoints/SupplierPortalEndpoints.cs:163 | core/supplier.service.ts:73 |
+| `GET` | `/api/supplier/summary` | Endpoints/SupplierPortalEndpoints.cs:62 | core/supplier.service.ts:61 |
 | `GET` | `/api/suppliers` | Endpoints/CatalogueEndpoints.cs:35 | core/suppliers.service.ts:32 |
 | `GET` | `/api/suppliers/{slug}` | Endpoints/SupplierPageEndpoints.cs:22 | core/suppliers.service.ts:36 |
-| `POST` | `/api/suppliers/register` | Endpoints/SupplierSignupEndpoints.cs:46 | pages/supplier-register.page.ts:159 |
+| `POST` | `/api/suppliers/register` | Endpoints/SupplierSignupEndpoints.cs:48 | pages/supplier-register.page.ts:159 |
 | `GET` | `/api/systems` | Endpoints/CatalogueEndpoints.cs:23 | core/catalog.service.ts:11 |
-| `GET` | `/api/tickets` | Endpoints/TicketEndpoints.cs:40 | core/support.service.ts:19 |
-| `POST` | `/api/tickets` | Endpoints/TicketEndpoints.cs:65 | core/support.service.ts:28 |
-| `GET` | `/api/tickets/{id}` | Endpoints/TicketEndpoints.cs:99 | core/support.service.ts:24 |
-| `POST` | `/api/tickets/{id}/messages` | Endpoints/TicketEndpoints.cs:137 | core/support.service.ts:33 |
-| `GET` | `/api/vehicles` | Endpoints/VehicleEndpoints.cs:14 | core/vehicles.service.ts:58 |
-| `GET` | `/api/vehicles/find` | Endpoints/VehicleFinderEndpoints.cs:23 | pages/vehicle-finder.page.ts:221 |
-| `GET` | `/api/vehicles/vin` | Endpoints/VehicleEndpoints.cs:24 | core/vehicles.service.ts:64 |
+| `GET` | `/api/tickets` | Endpoints/TicketEndpoints.cs:39 | core/support.service.ts:19 |
+| `POST` | `/api/tickets` | Endpoints/TicketEndpoints.cs:64 | core/support.service.ts:28 |
+| `GET` | `/api/tickets/{id}` | Endpoints/TicketEndpoints.cs:98 | core/support.service.ts:24 |
+| `POST` | `/api/tickets/{id}/messages` | Endpoints/TicketEndpoints.cs:136 | core/support.service.ts:33 |
+| `GET` | `/api/vehicles` | Endpoints/VehicleEndpoints.cs:15 | core/vehicles.service.ts:58 |
+| `GET` | `/api/vehicles/find` | Endpoints/VehicleFinderEndpoints.cs:24 | pages/vehicle-finder.page.ts:221 |
+| `GET` | `/api/vehicles/vin` | Endpoints/VehicleEndpoints.cs:25 | core/vehicles.service.ts:64 |

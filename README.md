@@ -560,15 +560,22 @@ There is no CI here. The other repository has a pipeline; this one has no
 remote to run against yet, so `dotnet test` is a thing somebody has to
 remember. That is worth fixing on the day this gets pushed somewhere.
 
-**The business messages are here; the account ones are not.** `Mail/` sends
-what the other API sends when an order is accepted, refused, shipped or called
-off, and when a ticket is answered — the same four statuses, the same silence on
-the other four, the same sentences word for word. What is still missing is
-password recovery and address confirmation: `/api/auth` here is login, register
-and logout, and neither of those flows is ported, so nothing here calls the
-throwing `SendAsync` yet.
+**The business messages are here, and so are the account ones now.** `Mail/`
+sends what the other API sends when an order is accepted, refused, shipped or
+called off, and when a ticket is answered — the same four statuses, the same
+silence on the other four, the same sentences word for word.
 
-It was ported ahead of the day it matters, deliberately. Email is a side effect
+Password recovery and address confirmation used to be the gap in that sentence,
+and they were the only place the storefront could reach a 404 by using the app
+normally. They are ported (T-196): `Endpoints/AccountRecoveryEndpoints.cs` over
+`Auth/VerificationTokens.cs`, and registration sends a confirmation link again.
+Two things there are a contract with the other API rather than a preference,
+because both read one `VerificationToken` table and only the hash of a token is
+stored — the token encoding and hash (base64url, SHA-256, lowercase hex), and
+the word "link" in every refusal about a token, which the reset page matches to
+decide whether to offer a fresh one. See CONTRACTS.md.
+
+The mailer was ported ahead of the day it matters, deliberately. Email is a side effect
 of a write, not a write: both APIs put the same rows in the same database either
 way, so the invariant this port exists to keep — *the two agree on every write* —
 was never at risk from the gap. But the day a transport is configured the gap

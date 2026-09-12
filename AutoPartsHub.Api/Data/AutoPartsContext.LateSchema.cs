@@ -58,6 +58,7 @@ public partial class AutoPartsContext
         ConfigureSupport(modelBuilder);
         ConfigureImports(modelBuilder);
         ConfigureBestOffer(modelBuilder);
+        ConfigureMissingDefaults(modelBuilder);
     }
 
     /// <summary>

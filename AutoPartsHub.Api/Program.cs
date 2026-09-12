@@ -69,6 +69,7 @@ builder.Services.AddSingleton(new SessionTokens(
 
 builder.Services.AddScoped<PricingContextLoader>();
 builder.Services.AddSingleton<FullTextSearch>();
+builder.Services.AddScoped<AutoPartsHub.Api.Auth.VerificationTokens>();
 builder.Services.AddScoped<SearchQueries>();
 builder.Services.AddScoped<SpecQueries>();
 builder.Services.AddScoped<AutoPartsHub.Api.Vehicles.VehicleFinder>();
@@ -200,6 +201,7 @@ app.MapSupplierSignupEndpoints();
 app.MapBulkLookupEndpoints();
 app.MapVehicleEndpoints();
 app.MapAuthEndpoints();
+app.MapAccountRecoveryEndpoints();
 app.MapProductEndpoints();
 app.MapSearchEndpoints();
 app.MapGoodsCategoryEndpoints();

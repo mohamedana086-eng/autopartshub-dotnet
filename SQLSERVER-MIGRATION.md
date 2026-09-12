@@ -37,6 +37,16 @@ git history rather than a setting.
 skips, visibly, when there is not one — so the suite still finishes in seconds
 on a machine with nothing installed.
 
+**Fourteen column defaults the scaffold did not bring across.** Every one on a
+NOT NULL column, so every one a 500 on any INSERT that did not name it —
+registration was the first found, by running it. `tools/default-audit.mjs`
+compares Prisma's schema against SQL Server's catalogue and found the rest;
+it reports nothing missing. Section 2b.
+
+**Account recovery (T-196).** The four routes the storefront called and nothing
+answered — forgot, reset, confirm, resend — and the confirmation link
+registration had stopped sending. Section 6.
+
 **The near-miss search (T-067).** The last PostgreSQL-only feature, and the
 only one that was a feature rather than a translation. pg_trgm's
 `word_similarity` scanned the whole catalogue on every search that came up
@@ -113,12 +123,12 @@ mean.
 
 ### 2. ~~The dialect~~ — one refusal, and it is the instance's
 
-`node tools/sql-dialect-check.mjs` extracts all 176 raw statements, replaces
+`node tools/sql-dialect-check.mjs` extracts all 185 raw statements, replaces
 each `{interpolation}` with NULL, and writes a batch that asks SQL
 Server to parse and bind every one of them under `SET NOEXEC ON` — so names
 are checked and nothing runs. Today:
 
-> **1 of 176**, and that one is not about the statement:
+> **1 of 185**, and that one is not about the statement:
 >
 > ```
 > Cannot use a CONTAINS or FREETEXT predicate on table 'Product'
@@ -154,7 +164,7 @@ instead of parsing it.
 
 ### 2a. What a parse check cannot see
 
-Worth stating plainly, because two bugs escaped through it:
+Worth stating plainly, because three bugs escaped through it:
 
 - **It does not evaluate constants.** `regexp_replace(x, p, '', 'g')` binds
   perfectly — SQL Server's fourth argument is `start`, an int, and the `'g'`
@@ -163,9 +173,14 @@ Worth stating plainly, because two bugs escaped through it:
   column, so no query computes one.
 - **It does not resolve union types.** Every branch parses; the conversion
   between them happens on execution.
+- **It cannot see a column the statement does not mention.** An INSERT naming
+  the columns it cares about is valid whatever the others default to — and if
+  one of them is NOT NULL with no default, it fails every time it runs. See
+  section 2b.
 
-Both classes are caught by the same thing, which is running the statement
-against rows.
+The first two are caught by running the statement against rows. The third is
+not caught by that either, if the rows come from a fixture that names
+everything — which is what fixtures do.
 
 What is in them, counted in the SQL itself:
 
@@ -193,7 +208,7 @@ Most of it is mechanical. Three parts are not:
   as typed. There is no equivalent, and the backlog already specified what
   replaces it (T-067: a full-text catalogue on names, a prefix seek on
   numbers), so it was that task arriving early rather than a translation. Done
-  — see section 6.
+  — see section 5.
 - **`LIMIT` without `ORDER BY`.** PostgreSQL allows it; `OFFSET … FETCH`
   requires an order. Each site needs a decision about what the order should be,
   and "whatever the database returned" is not one — that is how a paged list
@@ -202,6 +217,45 @@ Most of it is mechanical. Three parts are not:
 The largest concentrations are `AdminReferenceEndpoints.cs` (13),
 `AdminSiteWriteEndpoints.cs` (10), `AdminPriceListWriteEndpoints.cs` (9),
 `AdminDeskEndpoints.cs` (9) and `Admin/MarkupRules.cs` (9).
+
+### 2b. The defaults the scaffold did not bring across
+
+Found by registering an account. `POST /api/auth/register` answered **500**:
+
+```
+Cannot insert the value NULL into column 'discountPercent', table 'Client';
+column does not allow nulls.
+```
+
+The same fault as section 1, one layer down. Scaffolding recorded each column's
+type and nullability but not, for fourteen of them, the default behind it. That
+was invisible while the schema was being read INTO the model — the defaults
+were really there, and every INSERT relied on them. It stopped being invisible
+the moment a schema was generated FROM the model.
+
+All fourteen are NOT NULL, so there is no gentle version: each is a 500 on any
+INSERT that does not name that column.
+
+| Table | Column | | Table | Column |
+|---|---|---|---|---|
+| Client | discountPercent | | StockLevel | quantity |
+| ClientCategory | minOrderAmount | | StockLevel | reserved |
+| ClientCategory | requiresApproval | | Warehouse | priority |
+| Currency | isBase | | MarkupRule | priority |
+| Interchange | exactMatch | | PriceList | active |
+| Interchange | isOEM | | ProductImage | sortOrder |
+| Manufacturer | isOEM | | VehicleSystem | order |
+
+`tools/default-audit.mjs` found the other thirteen by comparing Prisma's
+schema — which IS the PostgreSQL one — against SQL Server's catalogue, so they
+were found by reading rather than one at a time by whoever hit them. It reports
+nothing missing now. **Run it after any schema change.**
+
+There is a smaller lesson in `Interchange.exactMatch`. It had already been met
+once, while writing the near-miss fixtures: an INSERT failed, the column was
+added to it, and the work carried on. That is the shape this class of bug hides
+in — in a fixture it looks like a fixture detail, and only in an endpoint does
+it look like what it is.
 
 ### 3. ~~What the check cannot tell you~~ — done
 
@@ -312,7 +366,48 @@ products, three thousand cross-references and five hundred brands. One test
 points the same detector at the query that still scans on purpose, so "no
 scans" cannot pass by seeing nothing.
 
-### 6. The cutover
+### 6. T-196 — account recovery
+
+The four routes CONTRACTS.md listed under "what the storefront asks for and
+nothing answers", and the only place the storefront could reach a 404 by using
+the app normally: `password/forgot`, `password/reset`, `email/confirm`,
+`email/resend`. Registration had also stopped sending its confirmation link,
+which left the banner asking somebody to confirm an address with nothing to
+confirm until they pressed "send it again".
+
+They are a port, not a design — the other API has all four, and the reasoning
+in them is worth keeping word for word. `Auth/VerificationTokens.cs` is the
+shared mechanism; `Endpoints/AccountRecoveryEndpoints.cs` is the four routes.
+
+**Two things in that flow are a contract rather than a preference**, because
+both APIs read one `VerificationToken` table and only the hash of a token is
+stored:
+
+- the encoding and the hash — base64url unpadded, SHA-256, lowercase hex. A
+  link mailed by one API is redeemed by whichever one the customer's click
+  reaches. .NET's `Convert.ToHexString` is uppercase, and using it would have
+  produced "that reset link is not valid" on links that were valid, silently;
+- the word "link" in every refusal about a token, which
+  `pages/reset-password.page.ts` matches with `/link/i` to decide whether to
+  offer a fresh one. Reword it and the page still shows the error, still looks
+  right, and stops offering the one button that gets the person out of it.
+
+Both are asserted — the first against values produced by the other API's own
+crypto rather than by reading this code back to itself.
+
+**Ported to SQL Server, not copied.** `FOR UPDATE OF v` became
+`WITH (UPDLOCK, ROWLOCK)`, `CURRENT_TIMESTAMP - INTERVAL '1 hour'` became
+`DATEADD(hour, -1, SYSUTCDATETIME())`, and every `CURRENT_TIMESTAMP` became
+`SYSUTCDATETIME()` for the reason in section 3.
+
+**Verified by running it**, which is how the registration 500 in section 2b was
+found: register, read the token out of the outbox, confirm it, confirm it again
+as a mail scanner would, ask for a reset, spend it, spend it twice, then sign
+in with the old password and the new one. The suite covers the mechanism — the
+locking, the expiry, the rate limit, the rollback — and the round trip covers
+the part no unit can: that the routes are wired and answer.
+
+### 7. The cutover
 
 The two applications share one database today. Whatever else is decided, that
 stops being true the moment this one is pointed at SQL Server — so the
@@ -325,8 +420,21 @@ has to be moved rather than mirrored.
 SqlLocalDB start MSSQLLocalDB
 dotnet ef database update --project AutoPartsHub.Api
 node tools/sql-dialect-check.mjs
-sqlcmd -S "(localdb)\MSSQLLocalDB" -d AutoPartsHub -i tools/.sql-check.sql
+sqlcmd -S "(localdb)\MSSQLLocalDB" -d AutoPartsHub -I -i tools/.sql-check.sql
 ```
 
 Statements that fail are the ones preceded by a `### n file:line` marker in the
-output.
+output. `-I` is not optional: sqlcmd turns `QUOTED_IDENTIFIER` off by default
+and every statement in this application quotes its identifiers, so without it
+the failures are all the same one and none of them is real.
+
+One statement is expected to fail, on an instance without Full-Text Search —
+see section 2.
+
+```bash
+node tools/default-audit.mjs
+```
+
+Column defaults PostgreSQL has and SQL Server does not. It should print
+"Nothing missing"; anything it lists is an INSERT that will fail somewhere. Run
+it after any schema change — section 2b.
