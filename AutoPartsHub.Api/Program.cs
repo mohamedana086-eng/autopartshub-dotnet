@@ -219,6 +219,7 @@ app.MapAuthEndpoints();
 app.MapAccountRecoveryEndpoints();
 app.MapManagerScopeEndpoints();
 app.MapFailedSearchEndpoints();
+app.MapTicketStatusEndpoints();
 app.MapProductEndpoints();
 app.MapSearchEndpoints();
 app.MapGoodsCategoryEndpoints();

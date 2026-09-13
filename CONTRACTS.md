@@ -69,7 +69,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## The nine differences the backlog requires — one left
+## ~~The nine differences the backlog requires~~ — eight closed, one part-open
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -84,12 +84,14 @@ each has to be settled before the screen is built rather than after.
 | Bulk body | ~~`partNumbers[]`, 1000 rows~~ — both served | `rows[]` with a manufacturer per row, 2000 rows, 2 MB ✅ |
 | Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
 | Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products` — `GET manager/scope` ✅ |
-| Ticket status | `PATCH /api/admin/tickets/{id}` | `PATCH /api/tickets/{id}/status` + `PUT following` |
+| Ticket status | ~~`PATCH /api/admin/tickets/{id}`~~ — both served | `PATCH /api/tickets/{id}/status` + `PUT following` ✅ |
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | ~~`partType`~~ — both served | `offerType`, kept separate from `matchIn` ✅ |
 
-Seven rows have moved, and all in the same way: the new shape is served and the
-old one still is, so the caller changes when it changes.
+Eight rows have moved, and all in the same way: the new shape is served and the
+old one still is, so the caller changes when it changes. The ninth — the
+supplier portal — is half done: `GET /api/admin/manager/scope` is served, and
+`GET`/`PATCH products` is not.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
 waits on the storefront.
@@ -109,6 +111,25 @@ status: doing it through the move would write `statusChangedAt` and
 `statusChangedById` for a change that did not happen. It sends no email — the
 customer was told when it shipped, and a second message with the same subject
 and a different number reads as a second shipment.
+
+`PATCH /api/tickets/{id}/status` moves the status write out of `/api/admin`,
+because it is not only staff who may set one. Staff may set any of the three on
+any ticket their scope reaches; a customer may settle or reopen their own, and
+may not mark it `answered` — that one means "we replied", which only a staff
+message produces, and letting a customer claim it would take their own ticket
+off the queue of things waiting on us.
+
+Being outside `/api/admin` means being outside `AdminRouteGuard`, which is
+path-based. That gap was worth more than the route: `PublicWriteTests` now
+asserts that every write outside `/api/admin` either reads the session or is
+named as deliberately public with a reason. Eight are named; adding a ninth is
+a sentence somebody has to write.
+
+`PUT /api/tickets/{id}/following` records who wants to hear about a ticket —
+the caller's own following and never anybody else's, because a route that took
+a person as well as a ticket would be a way to sign a colleague up for somebody
+else's mail. It records the intent only: nothing sends anything on the strength
+of it yet, which is NOTIF-02.
 
 `POST /api/catalog/bulk` takes `rows[]` beside `partNumbers[]`, and the
 brand on a row is the interesting half. A part number is not unique across
@@ -360,7 +381,9 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `GET` | `/api/tickets` | Endpoints/TicketEndpoints.cs:39 | core/support.service.ts:19 |
 | `POST` | `/api/tickets` | Endpoints/TicketEndpoints.cs:64 | core/support.service.ts:28 |
 | `GET` | `/api/tickets/{id}` | Endpoints/TicketEndpoints.cs:98 | core/support.service.ts:24 |
+| `PUT` | `/api/tickets/{id}/following` | Endpoints/TicketStatusEndpoints.cs:97 | _none_ |
 | `POST` | `/api/tickets/{id}/messages` | Endpoints/TicketEndpoints.cs:136 | core/support.service.ts:33 |
+| `PATCH` | `/api/tickets/{id}/status` | Endpoints/TicketStatusEndpoints.cs:45 | _none_ |
 | `GET` | `/api/vehicles` | Endpoints/VehicleEndpoints.cs:15 | core/vehicles.service.ts:58 |
 | `GET` | `/api/vehicles/find` | Endpoints/VehicleFinderEndpoints.cs:24 | pages/vehicle-finder.page.ts:221 |
 | `GET` | `/api/vehicles/vin` | Endpoints/VehicleEndpoints.cs:25 | core/vehicles.service.ts:64 |

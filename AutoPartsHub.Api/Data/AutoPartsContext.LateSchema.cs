@@ -55,9 +55,12 @@ public partial class AutoPartsContext
 
     public virtual DbSet<ExtraClient> ExtraClients { get; set; } = null!;
 
+    public virtual DbSet<TicketFollower> TicketFollowers { get; set; } = null!;
+
     private static void ConfigureLateSchema(ModelBuilder modelBuilder)
     {
         ConfigureManagerReach(modelBuilder);
+        ConfigureTicketFollowers(modelBuilder);
         ConfigureColumnsTheScaffoldMissed(modelBuilder);
         ConfigureCatalogueExtras(modelBuilder);
         ConfigureSupport(modelBuilder);
@@ -171,6 +174,52 @@ public partial class AutoPartsContext
                 "ExtraClient_not_self", "\"managerId\" <> \"clientId\""));
         });
     }
+
+    /// <summary>
+    /// Who wants to hear about a ticket.
+    /// </summary>
+    /// <remarks>
+    /// A ticket has one customer and whoever happens to answer it — enough to
+    /// deliver the conversation and not enough to decide who should be told
+    /// when it moves. A row here is somebody saying "tell me about this one".
+    ///
+    /// BOTH SIDES CASCADE, unlike the grant tables. That is not a different
+    /// judgement, it is a different shape: SQL Server refuses a second CASCADE
+    /// path between the same PAIR of tables, and these two point at different
+    /// parents. Client reaches this table one way only, because Ticket does
+    /// not cascade from Client. Asked before it was relied on.
+    /// </remarks>
+    private static void ConfigureTicketFollowers(ModelBuilder modelBuilder) =>
+        modelBuilder.Entity<TicketFollower>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("TicketFollower_pkey");
+            entity.ToTable("TicketFollower");
+
+            // Following twice is following once. Without this the list that
+            // decides who to tell returns the same person twice, which is one
+            // message each time.
+            entity.HasIndex(e => new { e.TicketId, e.ClientId }, "TicketFollower_ticketId_clientId_key")
+                .IsUnique();
+            // "Which tickets am I following". The unique index leads with
+            // ticketId and already answers the other direction.
+            entity.HasIndex(e => e.ClientId, "TicketFollower_clientId_idx");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.TicketId).HasColumnName("ticketId");
+            entity.Property(e => e.ClientId).HasColumnName("clientId");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("SYSUTCDATETIME()").HasPrecision(3).HasColumnName("createdAt");
+
+            entity.HasOne<Ticket>().WithMany()
+                .HasForeignKey(e => e.TicketId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("TicketFollower_ticketId_fkey");
+
+            entity.HasOne<Client>().WithMany()
+                .HasForeignKey(e => e.ClientId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("TicketFollower_clientId_fkey");
+        });
 
     /// <summary>
     /// Columns added to tables that were already in the model.
