@@ -38,6 +38,10 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    -- dimension. Null for the many who buy through none, which
                    -- makes a rule naming outlets simply not apply to them.
                    c."outletId" AS "OutletId",
+                   -- Their agreed delivery terms, for the شروط التسليم
+                   -- dimension. On the account because pricing happens while
+                   -- browsing, long before an order has any.
+                   c."deliveryTerms" AS "DeliveryTerms",
                    cat."id" AS "CategoryId",
                    cat."name" AS "CategoryName",
                    cat."markupPercent" AS "CategoryMarkupPercent",
@@ -210,6 +214,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             SalesManagerId: account?.SalesManagerId,
             City: account?.City,
             OutletId: account?.OutletId,
+            DeliveryTerms: account?.DeliveryTerms,
             PriceListId: activeList?.Id,
             PriceListName: activeList?.Name,
             PriceListMarkupPercent: activeList?.MarkupPercent,
@@ -259,6 +264,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         string? SalesManagerId,
         string? City,
         string? OutletId,
+        string? DeliveryTerms,
         string? CategoryId,
         string? CategoryName,
         double? CategoryMarkupPercent,
@@ -288,6 +294,7 @@ public record RequestPricing(
     string? SalesManagerId = null,
     string? City = null,
     string? OutletId = null,
+    string? DeliveryTerms = null,
     /// <summary>Supplier id to business group, for the مجموعة الموردين
     /// dimension. Only the suppliers that have one.</summary>
     Dictionary<string, string>? SupplierGroups = null,
@@ -358,6 +365,7 @@ public record RequestPricing(
             SalesManagerId: SalesManagerId,
             City: City,
             OutletId: OutletId,
+            DeliveryTerms: DeliveryTerms,
             // The group of whichever supplier's offer won, looked up the same
             // way their markup is — the dimension has to follow the part to
             // whoever we would actually buy it from today.

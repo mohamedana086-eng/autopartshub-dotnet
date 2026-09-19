@@ -83,6 +83,8 @@ public static class MarkupDimensions
             "Customers looked after by any of these staff."),
         new("outlet", "Outlet", MatchKind.Exact, "caller",
             "Accounts buying through any of these outlets."),
+        new("deliveryTerms", "Delivery terms", MatchKind.Insensitive, "caller",
+            "Accounts whose agreed delivery terms are any of these."),
         new("city", "City", MatchKind.Insensitive, "caller",
             "Accounts registered in any of these cities."),
         new("currency", "Currency", MatchKind.Exact, "caller",

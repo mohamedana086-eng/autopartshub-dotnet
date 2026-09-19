@@ -96,6 +96,7 @@ public partial class AutoPartsContext
         modelBuilder.Entity<Client>(entity =>
         {
             entity.Property(e => e.OutletId).HasColumnName("outletId");
+            entity.Property(e => e.DeliveryTerms).HasColumnName("deliveryTerms");
             entity.HasIndex(e => e.OutletId, "Client_outletId_idx");
 
             // SET NULL, which PostgreSQL has and SQL Server accepts here:

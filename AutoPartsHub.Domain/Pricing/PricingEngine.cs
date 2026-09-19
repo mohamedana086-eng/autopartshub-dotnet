@@ -196,6 +196,7 @@ public static class PricingEngine
         "clientRole" => ctx.ClientRole,
         "salesManager" => ctx.SalesManagerId,
         "outlet" => ctx.OutletId,
+        "deliveryTerms" => ctx.DeliveryTerms,
         "city" => ctx.City,
         "currency" => (ctx.Currency ?? BaseCurrency).Code,
         "priceList" => ctx.PriceListId,
@@ -358,6 +359,8 @@ public record PricingContext(
     string? City = null,
     /// <summary>Which outlet this account buys through — منفذ البيع.</summary>
     string? OutletId = null,
+    /// <summary>The account's agreed delivery terms — شروط التسليم.</summary>
+    string? DeliveryTerms = null,
     /// <summary>The supplier's business grouping — مجموعة الموردين.</summary>
     string? SupplierGroup = null,
     /// <summary>The purchase price list in force, so a rule can apply only while it is.</summary>
