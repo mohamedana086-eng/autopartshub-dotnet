@@ -34,6 +34,10 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    -- rather than the part.
                    c."id" AS "ClientId", c."role" AS "ClientRole",
                    c."salesManagerId" AS "SalesManagerId", c."city" AS "City",
+                   -- Which outlet they buy through, for the منفذ البيع
+                   -- dimension. Null for the many who buy through none, which
+                   -- makes a rule naming outlets simply not apply to them.
+                   c."outletId" AS "OutletId",
                    cat."id" AS "CategoryId",
                    cat."name" AS "CategoryName",
                    cat."markupPercent" AS "CategoryMarkupPercent",
@@ -149,6 +153,22 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         var supplierMarkups = supplierMarkupRows.ToDictionary(
             s => s.Id, s => (s.Name, s.MarkupPercent), StringComparer.Ordinal);
 
+        // The supplier groups, for the same reason and in the same shape as
+        // the markups above: a few hundred rows read once per request beats a
+        // join added to all six queries that price a row.
+        //
+        // Its own query rather than a column on the one above, because that
+        // one only loads suppliers that HAVE a markup — a supplier in a group
+        // and without a markup of their own would be invisible to it.
+        var supplierGroupRows = await db.Database.SqlQuery<SupplierGroupRow>($"""
+            SELECT "id" AS "Id", "groupName" AS "GroupName"
+            FROM "Supplier"
+            WHERE "groupName" IS NOT NULL
+            """).ToListAsync(ct);
+
+        var supplierGroups = supplierGroupRows.ToDictionary(
+            s => s.Id, s => s.GroupName, StringComparer.Ordinal);
+
         // The goods categories that price something, as a lookup rather than a
         // join on every priceable query.
         //
@@ -189,10 +209,12 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             ClientRole: account?.ClientRole,
             SalesManagerId: account?.SalesManagerId,
             City: account?.City,
+            OutletId: account?.OutletId,
             PriceListId: activeList?.Id,
             PriceListName: activeList?.Name,
             PriceListMarkupPercent: activeList?.MarkupPercent,
-            SupplierMarkups: supplierMarkups);
+            SupplierMarkups: supplierMarkups,
+            SupplierGroups: supplierGroups);
     }
 
     /// <summary>
@@ -236,6 +258,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         string? ClientRole,
         string? SalesManagerId,
         string? City,
+        string? OutletId,
         string? CategoryId,
         string? CategoryName,
         double? CategoryMarkupPercent,
@@ -264,6 +287,10 @@ public record RequestPricing(
     string? ClientRole = null,
     string? SalesManagerId = null,
     string? City = null,
+    string? OutletId = null,
+    /// <summary>Supplier id to business group, for the مجموعة الموردين
+    /// dimension. Only the suppliers that have one.</summary>
+    Dictionary<string, string>? SupplierGroups = null,
     /// <summary>The purchase price list in force, or null when none is.</summary>
     string? PriceListId = null,
     /// <summary>
@@ -330,6 +357,11 @@ public record RequestPricing(
             ClientRole: ClientRole,
             SalesManagerId: SalesManagerId,
             City: City,
+            OutletId: OutletId,
+            // The group of whichever supplier's offer won, looked up the same
+            // way their markup is — the dimension has to follow the part to
+            // whoever we would actually buy it from today.
+            SupplierGroup: SupplierGroups?.GetValueOrDefault(SupplierIdFor(row)),
             PriceListId: PriceListId), Rules);
     }
 
@@ -440,3 +472,6 @@ public interface IPriceable
     /// <summary>oem | aftermarket | substitute, for the "part type" dimension.</summary>
     string PartType { get; }
 }
+
+/// <summary>A supplier and the business group they are in.</summary>
+public record SupplierGroupRow(string Id, string GroupName);

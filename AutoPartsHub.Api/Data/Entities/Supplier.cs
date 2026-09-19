@@ -23,6 +23,10 @@ public partial class Supplier
 
     public string? Country { get; set; }
 
+    /// <summary>A business grouping of suppliers — the مجموعة الموردين markup
+    /// dimension. Free text, like Country beside it.</summary>
+    public string? GroupName { get; set; }
+
     public int? GuaranteeMonths { get; set; }
 
     public int? DefaultStockDays { get; set; }

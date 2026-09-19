@@ -57,6 +57,8 @@ public static class MarkupDimensions
         // ------------------------------------------------------------- the part
         new("supplier", "Supplier", MatchKind.Exact, "part",
             "Parts bought from any of these suppliers."),
+        new("supplierGroup", "Supplier group", MatchKind.Insensitive, "part",
+            "Parts bought from suppliers in any of these groups."),
         new("manufacturer", "Brand", MatchKind.Insensitive, "part",
             "Parts made by any of these brands."),
         new("vehicleSystem", "Vehicle system", MatchKind.Exact, "part",
@@ -79,6 +81,8 @@ public static class MarkupDimensions
             "RETAIL, B2B, SALES or ADMIN."),
         new("salesManager", "Sales manager", MatchKind.Exact, "caller",
             "Customers looked after by any of these staff."),
+        new("outlet", "Outlet", MatchKind.Exact, "caller",
+            "Accounts buying through any of these outlets."),
         new("city", "City", MatchKind.Insensitive, "caller",
             "Accounts registered in any of these cities."),
         new("currency", "Currency", MatchKind.Exact, "caller",

@@ -182,6 +182,7 @@ public static class PricingEngine
     {
         // the part
         "supplier" => string.IsNullOrEmpty(ctx.SupplierId) ? null : ctx.SupplierId,
+        "supplierGroup" => ctx.SupplierGroup,
         "manufacturer" => ctx.ManufacturerName,
         "vehicleSystem" => ctx.VehicleSystemSlug,
         "goodsCategory" => ctx.GoodsCategoryId,
@@ -194,6 +195,7 @@ public static class PricingEngine
         "client" => ctx.ClientId,
         "clientRole" => ctx.ClientRole,
         "salesManager" => ctx.SalesManagerId,
+        "outlet" => ctx.OutletId,
         "city" => ctx.City,
         "currency" => (ctx.Currency ?? BaseCurrency).Code,
         "priceList" => ctx.PriceListId,
@@ -354,6 +356,10 @@ public record PricingContext(
     string? ClientRole = null,
     string? SalesManagerId = null,
     string? City = null,
+    /// <summary>Which outlet this account buys through — منفذ البيع.</summary>
+    string? OutletId = null,
+    /// <summary>The supplier's business grouping — مجموعة الموردين.</summary>
+    string? SupplierGroup = null,
     /// <summary>The purchase price list in force, so a rule can apply only while it is.</summary>
     string? PriceListId = null,
     /// <summary>

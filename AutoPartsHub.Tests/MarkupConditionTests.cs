@@ -524,13 +524,60 @@ public class MarkupConditionTests
         }
     }
 
+    /// <summary>
+    /// The two ports know the same dimensions, by name.
+    /// </summary>
+    /// <remarks>
+    /// The two price the same shop from the same table. A dimension one of
+    /// them has never heard of is a rule that applies on one API and not the
+    /// other — the failure the comparison harness exists to catch, caught here
+    /// instead and far earlier.
+    ///
+    /// It used to assert the COUNT, which is most of the way there and passes
+    /// happily if each port gains a different dimension. The names are read
+    /// out of the other port's own file, so agreeing is the only way through.
+    ///
+    /// Skipped, visibly, when that repository is not beside this one — the
+    /// same choice the SQL Server tests make. A test that quietly passed
+    /// because it could not find the thing it compares against would be worse
+    /// than no test.
+    /// </remarks>
     [Fact]
     public void SaysTheSameThingAsTheOtherPort()
     {
-        // The two ports price the same shop from the same table. A dimension
-        // one of them has never heard of is a rule that applies on one API and
-        // not on the other — which is the failure the comparison harness
-        // exists to catch, caught here instead.
-        Assert.Equal(14, MarkupDimensions.All.Count);
+        var theirs = OtherPortDimensions();
+
+        // This xunit does not have Assert.Skip, so the absence is reported as
+        // a failure naming the reason rather than as a silent pass. A test
+        // that could not find what it compares against and said nothing would
+        // be worse than no test.
+        Assert.True(theirs is not null,
+            "The storefront repository is not beside this one, so the other port's "
+            + "dimension list cannot be read. Set NODE_REPO to compare them.");
+
+        Assert.Equal(theirs, MarkupDimensions.All.Select(d => d.Name).ToArray());
+    }
+
+    /// <summary>The other port's dimension names, in order, or null.</summary>
+    /// <remarks>
+    /// Read as text rather than through anything that understands TypeScript:
+    /// the list is a literal, the names are the only thing being compared, and
+    /// a parser would be a second thing that can be wrong.
+    /// </remarks>
+    private static string[]? OtherPortDimensions()
+    {
+        var repo = Environment.GetEnvironmentVariable("NODE_REPO")
+            ?? Path.Combine("C:", "Users", "Aio", "autoparts-hub", "autoparts-hub");
+
+        var file = Path.Combine(repo, "lib", "markup-dimensions.ts");
+        if (!File.Exists(file)) return null;
+
+        var source = File.ReadAllText(file);
+        var list = source.IndexOf("DIMENSIONS", StringComparison.Ordinal);
+        if (list < 0) return null;
+
+        return [.. System.Text.RegularExpressions.Regex
+            .Matches(source[list..], @"name:\s*'(?<name>\w+)'")
+            .Select(m => m.Groups["name"].Value)];
     }
 }

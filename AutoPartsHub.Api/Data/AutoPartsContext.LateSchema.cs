@@ -59,6 +59,7 @@ public partial class AutoPartsContext
 
     private static void ConfigureLateSchema(ModelBuilder modelBuilder)
     {
+        ConfigureMarkupDimensionColumns(modelBuilder);
         ConfigureManagerReach(modelBuilder);
         ConfigureTicketFollowers(modelBuilder);
         ConfigureColumnsTheScaffoldMissed(modelBuilder);
@@ -67,6 +68,45 @@ public partial class AutoPartsContext
         ConfigureImports(modelBuilder);
         ConfigureBestOffer(modelBuilder);
         ConfigureMissingDefaults(modelBuilder);
+    }
+
+    /// <summary>
+    /// The two columns the markup dimensions needed.
+    /// </summary>
+    /// <remarks>
+    /// Of the seven dimensions from the client's document that were left
+    /// unbuilt, these are the two that needed somewhere to record a fact
+    /// rather than a definition of what the fact means.
+    ///
+    /// <c>Supplier.groupName</c> is free text for the same reason
+    /// <c>Supplier.country</c> beside it is: the vocabulary is the business's
+    /// own, and a table would mean inventing its rows.
+    ///
+    /// <c>Client.outletId</c> is the link that was missing. RetailOutlet has
+    /// existed since the outlets landed; nothing said which one an account
+    /// buys through, so a pricing request had nothing to narrow on. It is on
+    /// the ACCOUNT rather than the order because pricing happens while
+    /// somebody browses.
+    /// </remarks>
+    private static void ConfigureMarkupDimensionColumns(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Supplier>(entity =>
+            entity.Property(e => e.GroupName).HasColumnName("groupName"));
+
+        modelBuilder.Entity<Client>(entity =>
+        {
+            entity.Property(e => e.OutletId).HasColumnName("outletId");
+            entity.HasIndex(e => e.OutletId, "Client_outletId_idx");
+
+            // SET NULL, which PostgreSQL has and SQL Server accepts here:
+            // Client already cascades nothing from RetailOutlet, so there is
+            // no second path for the engine to refuse. An outlet closing must
+            // not take its customers with it.
+            entity.HasOne<RetailOutlet>().WithMany()
+                .HasForeignKey(e => e.OutletId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("Client_outletId_fkey");
+        });
     }
 
     /// <summary>
