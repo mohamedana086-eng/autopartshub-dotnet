@@ -235,6 +235,7 @@ app.MapAdminPriceListWriteEndpoints();
 app.MapAdminCatalogueWriteEndpoints();
 app.MapAdminDeskWriteEndpoints();
 app.MapSupplierPortalEndpoints();
+app.MapSupplierProductEndpoints();
 app.MapTicketEndpoints();
 app.MapAdminOfferEndpoints();
 app.MapAdminOrderWriteEndpoints();

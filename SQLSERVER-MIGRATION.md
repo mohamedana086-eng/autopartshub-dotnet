@@ -130,12 +130,12 @@ mean.
 
 ### 2. ~~The dialect~~ — one refusal, and it is the instance's
 
-`node tools/sql-dialect-check.mjs` extracts all 185 raw statements, replaces
+`node tools/sql-dialect-check.mjs` extracts all 202 raw statements, replaces
 each `{interpolation}` with NULL, and writes a batch that asks SQL
 Server to parse and bind every one of them under `SET NOEXEC ON` — so names
 are checked and nothing runs. Today:
 
-> **1 of 185**, and that one is not about the statement:
+> **1 of 202**, and that one is not about the statement:
 >
 > ```
 > Cannot use a CONTAINS or FREETEXT predicate on table 'Product'
@@ -171,7 +171,7 @@ instead of parsing it.
 
 ### 2a. What a parse check cannot see
 
-Worth stating plainly, because three bugs escaped through it:
+Worth stating plainly, because six bugs escaped through it:
 
 - **It does not evaluate constants.** `regexp_replace(x, p, '', 'g')` binds
   perfectly — SQL Server's fourth argument is `start`, an int, and the `'g'`
@@ -184,6 +184,21 @@ Worth stating plainly, because three bugs escaped through it:
   the columns it cares about is valid whatever the others default to — and if
   one of them is NOT NULL with no default, it fails every time it runs. See
   section 2b.
+- **It does not read a single row, so it never checks a TYPE against the C#
+  waiting for it.** PostgreSQL has a boolean type and SQL Server does not, so
+  every `(a = b)` that was a VALUE became
+  `CASE WHEN a = b THEN 1 ELSE 0 END` — correct SQL, wrong type. It yields an
+  int, SqlClient hands that to `GetBoolean`, and the read throws. Three
+  statements shipped that way: the whole supplier-offer editor
+  (`PUT /api/admin/products/{id}/offers`) and both client-detail reads, each
+  answering 500. One word fixes each — `CAST(… AS bit)` — and the trouble is
+  entirely in noticing.
+
+  Found by a harness stumbling into one of them. `BooleanColumnTests` now
+  pairs every `SqlQuery<T>` with the property each alias lands on and fails
+  when a bare CASE maps to a `bool`; it leaves `VehicleFinder`'s nine filter
+  flags alone, because those are compared to `1` inside their own statement
+  and no C# property carries them.
 
 The first two are caught by running the statement against rows. The third is
 not caught by that either, if the rows come from a fixture that names

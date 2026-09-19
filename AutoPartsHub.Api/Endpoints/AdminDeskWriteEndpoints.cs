@@ -233,7 +233,7 @@ public static class AdminDeskWriteEndpoints
         (await db.Database.SqlQuery<AdminClientRow>($"""
             SELECT c."id" AS "Id", c."name" AS "Name", c."email" AS "Email", c."role" AS "Role",
                    c."city" AS "City",
-                   CASE WHEN c."passwordHash" IS NOT NULL THEN 1 ELSE 0 END AS "HasLogin",
+                   CAST(CASE WHEN c."passwordHash" IS NOT NULL THEN 1 ELSE 0 END AS bit) AS "HasLogin",
                    c."categoryId" AS "CategoryId", cat."name" AS "CategoryName",
                    c."discountPercent" AS "DiscountPercent",
                    c."currencyId" AS "CurrencyId", cur."code" AS "CurrencyCode",

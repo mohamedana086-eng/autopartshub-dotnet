@@ -69,7 +69,7 @@ stored:
 Both are asserted — `VerificationTokenFormatTests` against values produced by
 the other API's own crypto, and `RecoveryMessageTests` against the wording.
 
-## ~~The nine differences the backlog requires~~ — eight closed, one part-open
+## ~~The nine differences the backlog requires~~ — all nine closed
 
 These are not gaps in the implementation — they are places where a working
 endpoint has a different shape from the one the new frontend is specified
@@ -83,15 +83,14 @@ each has to be settled before the screen is built rather than after.
 | Cart write | ~~`PUT /api/cart`~~ — both served | `POST` / `PATCH` / `DELETE /api/cart/lines` ✅ |
 | Bulk body | ~~`partNumbers[]`, 1000 rows~~ — both served | `rows[]` with a manufacturer per row, 2000 rows, 2 MB ✅ |
 | Order approval | ~~`PATCH /api/admin/orders/{id}`~~ — both served | `POST approve` / `reject` / `cancel`, `PATCH shipping` ✅ |
-| Supplier portal | `summary` / `orders` / `stock` | + `GET`/`PATCH products` — `GET manager/scope` ✅ |
+| Supplier portal | ~~`summary` / `orders` / `stock`~~ — all served | + `GET`/`PATCH products`, + `GET manager/scope` ✅ |
 | Ticket status | ~~`PATCH /api/admin/tickets/{id}`~~ — both served | `PATCH /api/tickets/{id}/status` + `PUT following` ✅ |
 | Readiness | ~~`/health/db`~~ — both served | `/health/ready` ✅ |
 | Search filter | ~~`partType`~~ — both served | `offerType`, kept separate from `matchIn` ✅ |
 
-Eight rows have moved, and all in the same way: the new shape is served and the
-old one still is, so the caller changes when it changes. The ninth — the
-supplier portal — is half done: `GET /api/admin/manager/scope` is served, and
-`GET`/`PATCH products` is not.
+All nine have moved, and in the same way: the new shape is served and the old
+one still is, so the caller changes when it changes. Nothing the storefront
+sends today has stopped working.
 
 Dropping `/api/suppliers/register` is the third step of the sign-up move and
 waits on the storefront.
@@ -111,6 +110,30 @@ status: doing it through the move would write `statusChangedAt` and
 `statusChangedById` for a change that did not happen. It sends no email — the
 customer was told when it shipped, and a second message with the same subject
 and a different number reads as a second shipment.
+
+`GET`/`PATCH /api/supplier/products` is a supplier's own lines and the first
+thing in that portal they can change. It lists OFFERS rather than parts: a
+`Product` row is ours — its name, its category, what we sell it for — and a
+`SupplierOffer` is theirs.
+
+They may state three things: their lead time, their own part number, and
+whether the line is live. All three are facts about THEM that we would
+otherwise be guessing at or emailing about.
+
+**Not the price.** `purchasePrice` is what we pay and the first number the
+markup engine multiplies, so a change to it moves every customer-facing price
+for that part immediately and without anybody reading it. There is already a
+path for a supplier changing their prices — a price list somebody reviews and
+publishes (T-131) — and a second path with none of that is the one that gets
+used. It is refused by NAME rather than ignored, because a field silently
+dropped is a supplier who believes they have repriced a part and has not.
+**That is a judgement and the business may overturn it**; the refusal is one
+line and the validator already reads the field.
+
+The portal also does not say whether a supplier's offer is the one we buy at.
+It names no competitor and no price, and it would still tell them somebody is
+underneath them — which they should hear from us in a negotiation rather than
+from a tick on a screen.
 
 `PATCH /api/tickets/{id}/status` moves the status write out of `/api/admin`,
 because it is not only staff who may set one. Staff may set any of the three on
@@ -372,6 +395,8 @@ Handler paths are relative to `AutoPartsHub.Api/`; caller paths to
 | `GET` | `/api/orders` | Endpoints/OrderEndpoints.cs:20 | core/orders.service.ts:41 |
 | `POST` | `/api/orders` | Endpoints/OrderEndpoints.cs:95 | core/orders.service.ts:37 |
 | `GET` | `/api/supplier/orders` | Endpoints/SupplierPortalEndpoints.cs:109 | core/supplier.service.ts:67 |
+| `GET` | `/api/supplier/products` | Endpoints/SupplierProductEndpoints.cs:53 | _none_ |
+| `PATCH` | `/api/supplier/products/{productId}` | Endpoints/SupplierProductEndpoints.cs:88 | _none_ |
 | `GET` | `/api/supplier/stock` | Endpoints/SupplierPortalEndpoints.cs:163 | core/supplier.service.ts:73 |
 | `GET` | `/api/supplier/summary` | Endpoints/SupplierPortalEndpoints.cs:62 | core/supplier.service.ts:61 |
 | `GET` | `/api/suppliers` | Endpoints/CatalogueEndpoints.cs:35 | core/suppliers.service.ts:32 |

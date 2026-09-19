@@ -454,6 +454,7 @@ because the update and the stock movement are in the same transaction.
 | `tools/cart-lines.mjs` | the basket a line at a time, and eight concurrent adds with none lost |
 | `tools/bulk-lookup.mjs` | both bulk shapes, the caps, and which part a brand-named line means |
 | `tools/ticket-status.mjs` | who may set a ticket status, and who may follow one |
+| `tools/supplier-products.mjs` | two suppliers, a line each, and what neither can reach |
 | `tools/auth-interop.mjs` | a cookie from either API is accepted by the other |
 
 Five of them write. All five make their own rows, count what was there before

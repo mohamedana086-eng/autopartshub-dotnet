@@ -100,7 +100,11 @@ public static class AdminOfferEndpoints
                    s."active" AS "SupplierActive", o."purchasePrice" AS "PurchasePrice",
                    o."stockDays" AS "StockDays", o."supplierPartNumber" AS "SupplierPartNumber",
                    o."active" AS "Active",
-                   CASE WHEN bo."supplierId" = o."supplierId" THEN 1 ELSE 0 END AS "IsBest"
+                   -- CAST, because IsBest is read into a bool. PostgreSQL's
+                   -- (a = b) was a boolean VALUE; the CASE that replaced it
+                   -- produces an int, and SqlClient hands an int to
+                   -- GetBoolean, which throws. See BooleanColumnTests.
+                   CAST(CASE WHEN bo."supplierId" = o."supplierId" THEN 1 ELSE 0 END AS bit) AS "IsBest"
             FROM "SupplierOffer" o
             JOIN "Supplier" s ON s."id" = o."supplierId"
             LEFT JOIN "BestOffer" bo ON bo."productId" = o."productId"

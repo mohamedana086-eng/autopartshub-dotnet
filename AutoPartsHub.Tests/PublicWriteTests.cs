@@ -57,13 +57,23 @@ public partial class PublicWriteTests
 
     private static readonly HashSet<string> WriteMethods = ["Post", "Patch", "Put", "Delete"];
 
-    /// <summary>Reads the session, names an admin gate, or is a supplier's own.</summary>
+    /// <summary>Reads the session, names an admin gate, or names the supplier one.</summary>
+    /// <remarks>
+    /// <c>SupplierGate</c> is matched by the parameter rather than by the call,
+    /// because its method is <c>Require</c> — a name too generic to look for in
+    /// a body without matching things that are not gates at all. Declaring the
+    /// gate is what a handler has to do to use it, so it is the reliable
+    /// signal.
+    ///
+    /// It was added when the portal grew its first WRITE. Every supplier route
+    /// before that was a GET, so this test had never been asked about one.
+    /// </remarks>
     private static bool Gated(string body) =>
         body.Contains("SessionTokens.CookieName")
         || body.Contains("RequireAdmin(")
         || body.Contains("RequireStaff(")
         || body.Contains("RequireOperator(")
-        || body.Contains("RequireSupplier(");
+        || body.Contains("SupplierGate ");
 
     private static string[] EndpointFiles()
     {
