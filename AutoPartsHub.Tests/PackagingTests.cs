@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Catalogue;
+using AutoPartsHub.Domain.Catalogue;
 
 namespace AutoPartsHub.Tests;
 

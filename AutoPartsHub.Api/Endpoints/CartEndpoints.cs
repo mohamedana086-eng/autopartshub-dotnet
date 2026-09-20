@@ -2,6 +2,8 @@ using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -85,23 +87,233 @@ public static class CartEndpoints
                 wanted[productId] = wanted.GetValueOrDefault(productId) + (int)quantity!.Value;
             }
 
-            var ids = wanted.Keys.ToArray();
-            // "Still in the catalogue" includes whether anyone is selling it.
-            // A part behind a switched-off supplier is refused on the way into
-            // a basket, which is the earliest place to say no.
-            // Raw SQL rather than LINQ over the entity, because the packaging
-            // columns are not on it — the scaffolded model does not carry
-            // partType either, and columns added since are read this way
-            // rather than by hand-editing something generated. It also puts
-            // this query in the same shape as the Node one it has to agree
-            // with.
-            var carried = await db.Database.SqlQuery<CartPackagingRow>($"""
+            var refusal = await RefuseAsync(db, wanted, ct);
+            if (refusal is not null) return refusal;
+
+            await ReplaceAsync(db, session.UserId, wanted, ct);
+
+            return Results.Ok(await SerialiseAsync(db, pricing, http, session.UserId, ct));
+        });
+
+        MapLineEndpoints(app);
+    }
+
+    /// <summary>
+    /// The basket a line at a time.
+    /// </summary>
+    /// <remarks>
+    /// <c>POST /api/cart/lines { productId, quantity }</c> adds,
+    /// <c>PATCH /api/cart/lines/{productId} { quantity }</c> sets, and
+    /// <c>DELETE /api/cart/lines/{productId}</c> removes. The shape the
+    /// backlog specifies, served beside the whole-basket PUT rather than
+    /// instead of it — the storefront holds its basket in localStorage and
+    /// mirrors it, so moving it is a change on both sides at once (T-171,
+    /// T-172, T-174) and it can make that change when it makes it.
+    ///
+    /// WHY THESE ARE READ-MODIFY-WRITE AND THE PUT IS NOT
+    /// --------------------------------------------------
+    /// The PUT carries the whole basket, so there is nothing to read first and
+    /// nothing to race. A line change is the other way round: "add two" means
+    /// nothing without knowing what is there, and two tabs adding at the same
+    /// moment can each read one, each write two, and lose one of the adds.
+    ///
+    /// So the read and the write are one transaction, and it opens by taking
+    /// the same <c>MERGE … WITH (HOLDLOCK)</c> on the Cart row that
+    /// <see cref="ReplaceAsync"/> does. That lock is per customer, which is
+    /// exactly the grain that matters: two tabs belonging to one person
+    /// serialise, and two customers never wait for each other.
+    ///
+    /// Every rule about what a basket may hold is <see cref="RefuseAsync"/>'s,
+    /// the PUT's own — the part still being sold, the packaging it comes in,
+    /// how many lines a basket holds. A second shape that validated less would
+    /// be a way into the basket that the first shape closes.
+    /// </remarks>
+    private static void MapLineEndpoints(IEndpointRouteBuilder app)
+    {
+        // POST /api/cart/lines { productId, quantity }
+        //
+        // Adds to what is there rather than replacing it, which is what the
+        // whole-basket PUT does with the same part named twice — one line,
+        // quantities added. A customer who adds two of a part from a search
+        // and then two more from its page has four.
+        app.MapPost("/api/cart/lines", async (
+            System.Text.Json.JsonElement body, HttpContext http, SessionTokens tokens,
+            AutoPartsContext db, PricingContextLoader pricing, CancellationToken ct) =>
+        {
+            var session = tokens.Decode(http.Request.Cookies[SessionTokens.CookieName]);
+            if (session is null) return Results.Json(new { error = "Not signed in." }, statusCode: 401);
+
+            var productId = JsonValues.AsString(JsonValues.Get(body, "productId")).Trim();
+            if (productId.Length == 0) return Results.BadRequest(new { error = "Every item needs a product." });
+
+            var quantity = JsonValues.AsNumber(JsonValues.Get(body, "quantity"));
+            if (!JsonValues.IsWhole(quantity) || quantity < 1)
+            {
+                return Results.BadRequest(new { error = "Quantity must be a whole number of one or more." });
+            }
+
+            return await ChangeLineAsync(db, pricing, http, session.UserId, productId,
+                held => held + (int)quantity!.Value, ct);
+        });
+
+        // PATCH /api/cart/lines/<productId> { quantity }
+        //
+        // Sets the line, which is what a quantity box does. Zero is not a
+        // removal here: DELETE is, and a PATCH that quietly deleted would make
+        // "set it to what I typed" and "throw it away" the same request.
+        app.MapPatch("/api/cart/lines/{productId}", async (
+            string productId, System.Text.Json.JsonElement body, HttpContext http,
+            SessionTokens tokens, AutoPartsContext db, PricingContextLoader pricing,
+            CancellationToken ct) =>
+        {
+            var session = tokens.Decode(http.Request.Cookies[SessionTokens.CookieName]);
+            if (session is null) return Results.Json(new { error = "Not signed in." }, statusCode: 401);
+
+            var quantity = JsonValues.AsNumber(JsonValues.Get(body, "quantity"));
+            if (!JsonValues.IsWhole(quantity) || quantity < 1)
+            {
+                return Results.BadRequest(new { error = "Quantity must be a whole number of one or more." });
+            }
+
+            return await ChangeLineAsync(db, pricing, http, session.UserId, productId,
+                held => held == 0 ? null : (int)quantity!.Value, ct);
+        });
+
+        // DELETE /api/cart/lines/<productId>
+        //
+        // Removing a line that is not there succeeds. The basket ends in the
+        // state the caller asked for, and answering 404 would show an error on
+        // a screen for a part the customer had already removed in another tab
+        // — which is the one case where it is most likely to happen.
+        app.MapDelete("/api/cart/lines/{productId}", async (
+            string productId, HttpContext http, SessionTokens tokens,
+            AutoPartsContext db, PricingContextLoader pricing, CancellationToken ct) =>
+        {
+            var session = tokens.Decode(http.Request.Cookies[SessionTokens.CookieName]);
+            if (session is null) return Results.Json(new { error = "Not signed in." }, statusCode: 401);
+
+            return await ChangeLineAsync(db, pricing, http, session.UserId, productId, _ => 0, ct);
+        });
+    }
+
+    /// <summary>
+    /// Reads the basket, changes one line of it, and writes it back.
+    /// </summary>
+    /// <param name="change">
+    /// What the line should become, given what it holds now — 0 for a line
+    /// that is not there. Returning 0 removes it; returning null refuses,
+    /// which is how PATCH says "there is no such line to set".
+    /// </param>
+    private static async Task<IResult> ChangeLineAsync(
+        AutoPartsContext db, PricingContextLoader pricing, HttpContext http, string clientId,
+        string productId, Func<int, int?> change, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        // Opens by locking this customer's cart row, so the read below and the
+        // write after it cannot be interleaved with another tab's.
+        var cartId = await CartIdAsync(db, clientId, ct);
+
+        var wanted = (await LinesForAsync(db, clientId, ct))
+            .ToDictionary(line => line.ProductId, line => line.Quantity);
+
+        var next = change(wanted.GetValueOrDefault(productId));
+
+        if (next is null)
+        {
+            return Results.NotFound(new { error = "That part is not in the basket." });
+        }
+
+        if (next == 0) wanted.Remove(productId);
+        else wanted[productId] = next.Value;
+
+        if (wanted.Count > MaxLines)
+        {
+            return Results.BadRequest(new { error = "That is more lines than a basket can hold." });
+        }
+
+        // Only what is being added or changed is checked, not the whole
+        // basket. A part that left the catalogue while a basket sat there must
+        // not make every later change to that basket impossible — the PUT is
+        // where a basket is checked as a whole, because that is where a client
+        // sends one.
+        if (wanted.ContainsKey(productId))
+        {
+            var refusal = await RefuseAsync(
+                db, new Dictionary<string, int> { [productId] = wanted[productId] }, ct);
+
+            if (refusal is not null) return refusal;
+        }
+
+        await WriteLineAsync(db, cartId, productId, wanted.GetValueOrDefault(productId), ct);
+
+        await transaction.CommitAsync(ct);
+
+        return Results.Ok(await SerialiseAsync(db, pricing, http, clientId, ct));
+    }
+
+    /// <summary>
+    /// Writes one line: the quantity it should hold, or removes it at zero.
+    /// </summary>
+    /// <remarks>
+    /// The same MERGE the whole-basket write uses per line, and with the same
+    /// HOLDLOCK for the same reason — one customer with the shop open in two
+    /// tabs is enough to race an insert against an insert.
+    /// </remarks>
+    private static async Task WriteLineAsync(
+        AutoPartsContext db, string cartId, string productId, int quantity, CancellationToken ct)
+    {
+        if (quantity == 0)
+        {
+            await db.Database.ExecuteSqlAsync($"""
+                DELETE FROM "CartItem" WHERE "cartId" = {cartId} AND "productId" = {productId}
+                """, ct);
+            return;
+        }
+
+        await db.Database.ExecuteSqlAsync($"""
+            MERGE "CartItem" WITH (HOLDLOCK) AS target
+            USING (VALUES ({cartId}, {productId})) AS source("cartId", "productId")
+              ON target."cartId" = source."cartId"
+             AND target."productId" = source."productId"
+            WHEN MATCHED THEN
+              UPDATE SET "quantity" = {quantity}
+            WHEN NOT MATCHED THEN
+              INSERT ("id", "cartId", "productId", "quantity")
+              VALUES ({Ids.New()}, {cartId}, {productId}, {quantity});
+            """, ct);
+    }
+
+    /// <summary>
+    /// Whether a basket may hold what it says, or the sentence saying why not.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the whole-basket PUT and the three line routes, so the two
+    /// shapes cannot come to disagree about what a basket may contain. The
+    /// line routes are the newer shape and the easier one to write leniently:
+    /// a part that cannot be split into ones is refused whether it arrived in
+    /// a list of forty or on its own.
+    ///
+    /// Null means nothing is wrong.
+    /// </remarks>
+    private static async Task<IResult?> RefuseAsync(
+        AutoPartsContext db, Dictionary<string, int> wanted, CancellationToken ct)
+    {
+        var ids = wanted.Keys.ToArray();
+
+        // Raw SQL rather than LINQ over the entity, because the packaging
+        // columns are not on it — the scaffolded model does not carry
+        // partType either, and columns added since are read this way
+        // rather than by hand-editing something generated. It also puts
+        // this query in the same shape as the Node one it has to agree
+        // with.
+        var carried = await db.Database.SqlQuery<CartPackagingRow>($"""
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                        p."packagingUnit" AS "PackagingUnit",
                        p."quantityPerPackage" AS "QuantityPerPackage"
                 FROM "Product" p
                 LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
-                WHERE p."id" = ANY({ids}::text[])
+                WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 -- "Still in the catalogue" includes whether anyone is selling
                 -- it. A part behind a switched-off supplier is refused on the
                 -- way into a basket, which is the earliest place to say no.
@@ -124,33 +336,28 @@ public static class CartEndpoints
             // out at checkout that a part cannot be split means going back to
             // a screen they had finished with, and the message would have to
             // name a part they can no longer see.
-            foreach (var part in carried)
+        foreach (var part in carried)
+        {
+            var quantity = wanted[part.Id];
+            if (Packaging.IsOrderableQuantity(quantity, part.QuantityPerPackage)) continue;
+
+            return Results.BadRequest(new
             {
-                var quantity = wanted[part.Id];
-                if (Packaging.IsOrderableQuantity(quantity, part.QuantityPerPackage)) continue;
+                error = $"{part.Name} ({part.PartNumber}): " +
+                        Packaging.Refusal(quantity, part.QuantityPerPackage, part.PackagingUnit),
+            });
+        }
 
-                return Results.BadRequest(new
-                {
-                    error = $"{part.Name} ({part.PartNumber}): " +
-                            Packaging.Refusal(quantity, part.QuantityPerPackage, part.PackagingUnit),
-                });
-            }
+        if (carried.Count != ids.Length)
+        {
+            // A part deleted from the catalogue since it was added. Naming it
+            // would mean loading rows the caller may not have asked about; the
+            // client reloads the basket on this and shows what survived.
+            return Results.Json(
+                new { error = "A part in that basket is no longer in the catalogue." }, statusCode: 409);
+        }
 
-            var known = carried;
-            if (known.Count != ids.Length)
-            {
-                // A part deleted from the catalogue since it was added. Naming
-                // it would mean loading rows the caller may not have asked
-                // about; the client reloads the basket on this and shows what
-                // survived.
-                return Results.Json(
-                    new { error = "A part in that basket is no longer in the catalogue." }, statusCode: 409);
-            }
-
-            await ReplaceAsync(db, session.UserId, wanted, ct);
-
-            return Results.Ok(await SerialiseAsync(db, pricing, http, session.UserId, ct));
-        });
+        return null;
     }
 
     private static async Task<object> SerialiseAsync(
@@ -166,13 +373,19 @@ public static class CartEndpoints
 
         return new
         {
-            // Timestamps.Iso, not ToUniversalTime: the column is TIMESTAMP
-            // without a zone, so Npgsql hands it back with Kind=Unspecified,
-            // and ToUniversalTime reads Unspecified as local and shifts it by
+            // Timestamps.Iso, not ToUniversalTime: the column carries no zone,
+            // so the driver hands it back with Kind=Unspecified — datetime2
+            // through SqlClient exactly as TIMESTAMP did through Npgsql — and
+            // ToUniversalTime reads Unspecified as local and shifts it by
             // whatever the machine's offset happens to be. The value stored is
             // already UTC. This read three hours early on my machine and would
             // have read correctly on a server set to UTC — right where nobody
             // is looking, wrong everywhere else.
+            //
+            // The same three hours turned up again during the move, in the
+            // schema defaults: CURRENT_TIMESTAMP is local time to SQL Server.
+            // Every timestamp here is UTC and nothing may quietly assume
+            // otherwise.
             updatedAt = Timestamps.Iso(updatedAt),
             items = lines.Select(line => new
             {
@@ -236,13 +449,13 @@ public static class CartEndpoints
             LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
-             AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-            LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+             AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+            OUTER APPLY (
+              SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = true
-            ) st ON true
+              WHERE sl."productId" = p."id" AND w."active" = 1
+            ) st
             WHERE c."clientId" = {clientId}
             -- A part whose supplier has been switched off drops out of the
             -- basket the same way a deleted part already does — the JOIN above
@@ -263,38 +476,72 @@ public static class CartEndpoints
             """).ToListAsync(ct);
 
     /// <summary>
-    /// Replaces the basket with what was sent, in one transaction.
+    /// This customer's cart, made if they have not had one, locked either way.
     /// </summary>
     /// <remarks>
-    /// <c>updatedAt</c> is touched explicitly: the column only moves on a
-    /// write to Cart itself, and every change here is to its items. The
-    /// admin's open-baskets list is ordered by it, so a basket edited today
-    /// must not read as untouched.
+    /// An upsert that gives back the row's id whichever branch it took.
+    ///
+    /// PostgreSQL says this as INSERT … ON CONFLICT … RETURNING. SQL Server
+    /// says it as MERGE … OUTPUT, and the two differ in one way that matters:
+    /// ON CONFLICT is atomic against the unique index by construction, and
+    /// MERGE is not. Two callers can both find no match and both try to
+    /// insert, and the loser gets a unique-key violation instead of an update.
+    ///
+    /// WITH (HOLDLOCK) is what closes that — it takes a range lock on the key
+    /// being searched for, so the second caller waits rather than deciding. It
+    /// is not optional here: one customer with the shop open in two tabs is
+    /// enough to race it.
+    ///
+    /// That lock is also what makes the line routes safe. They read the basket
+    /// and write it back, which is a race in a way the whole-basket PUT is
+    /// not, and this is the first thing they do — so two tabs belonging to one
+    /// person serialise here, and two customers never wait for each other.
+    ///
+    /// <c>updatedAt</c> is touched on the matched branch because the column
+    /// only moves on a write to Cart itself, and most changes are to its
+    /// items. The admin's open-baskets list is ordered by it, so a basket
+    /// edited today must not read as untouched.
     /// </remarks>
+    private static async Task<string> CartIdAsync(
+        AutoPartsContext db, string clientId, CancellationToken ct) =>
+        (await db.Database.SqlQuery<string>($"""
+            MERGE "Cart" WITH (HOLDLOCK) AS target
+            USING (VALUES ({clientId})) AS source("clientId")
+              ON target."clientId" = source."clientId"
+            WHEN MATCHED THEN
+              UPDATE SET "updatedAt" = SYSUTCDATETIME()
+            WHEN NOT MATCHED THEN
+              INSERT ("id", "clientId", "updatedAt")
+              VALUES ({Ids.New()}, {clientId}, SYSUTCDATETIME())
+            OUTPUT INSERTED."id" AS "Value";
+            """).ToListAsync(ct)).Single();
+
+    /// <summary>Replaces the basket with what was sent, in one transaction.</summary>
     private static async Task ReplaceAsync(
         AutoPartsContext db, string clientId, Dictionary<string, int> wanted, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
-        var cartId = (await db.Database.SqlQuery<string>($"""
-            INSERT INTO "Cart" ("id", "clientId", "updatedAt")
-            VALUES ({Ids.New()}, {clientId}, now())
-            ON CONFLICT ("clientId") DO UPDATE SET "updatedAt" = now()
-            RETURNING "id" AS "Value"
-            """).ToListAsync(ct)).Single();
+        var cartId = await CartIdAsync(db, clientId, ct);
 
         var ids = wanted.Keys.ToArray();
         await db.Database.ExecuteSqlAsync($"""
             DELETE FROM "CartItem"
-            WHERE "cartId" = {cartId} AND NOT ("productId" = ANY({ids}::text[]))
+            WHERE "cartId" = {cartId} AND NOT EXISTS (SELECT 1 FROM OPENJSON({SqlList.Of(ids)}) WHERE value COLLATE DATABASE_DEFAULT = "productId")
             """, ct);
 
         foreach (var (productId, quantity) in wanted)
         {
             await db.Database.ExecuteSqlAsync($"""
-                INSERT INTO "CartItem" ("id", "cartId", "productId", "quantity")
-                VALUES ({Ids.New()}, {cartId}, {productId}, {quantity})
-                ON CONFLICT ("cartId", "productId") DO UPDATE SET "quantity" = {quantity}
+                MERGE "CartItem" WITH (HOLDLOCK) AS target
+                USING (VALUES ({cartId}, {productId})) AS source("cartId", "productId")
+                  ON target."cartId" = source."cartId"
+                 AND target."productId" = source."productId"
+                WHEN MATCHED THEN
+                  UPDATE SET "quantity" = {quantity}
+                WHEN NOT MATCHED THEN
+                  INSERT ("id", "cartId", "productId", "quantity")
+                  VALUES ({Ids.New()}, {cartId}, {productId}, {quantity});
                 """, ct);
         }
 

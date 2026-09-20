@@ -3,8 +3,9 @@ using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Inventory;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AutoPartsHub.Api.Endpoints;
 
@@ -155,8 +156,8 @@ public static class OrderEndpoints
                 LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
-                 AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-                WHERE p."id" = ANY({ids}::text[])
+                 AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+                WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 -- A switched-off supplier's part is not orderable. Dropping it
                 -- here rather than refusing separately is deliberate: the
                 -- caller already compares this count against what was asked
@@ -311,10 +312,14 @@ public static class OrderEndpoints
                 var order = (await db.Database.SqlQuery<PlacedOrder>($"""
                     INSERT INTO "Order" ("id", "reference", "clientId", "currencyCode", "currencyRate",
                                         "weightGrams", "weightComplete")
+                    -- OUTPUT is SQL Server's RETURNING, and on an INSERT it sits
+                    -- between the column list and VALUES. `status` and
+                    -- `createdAt` are read back rather than assumed because
+                    -- both come from database defaults.
+                    OUTPUT INSERTED."id" AS "Id", INSERTED."reference" AS "Reference",
+                           INSERTED."status" AS "Status", INSERTED."createdAt" AS "CreatedAt"
                     VALUES ({orderId}, {Reference()}, {clientId}, {currencyCode}, {rate},
                             {weight.Grams}, {weight.Complete})
-                    RETURNING "id" AS "Id", "reference" AS "Reference",
-                              "status" AS "Status", "createdAt" AS "CreatedAt"
                     """).ToListAsync(ct)).Single();
 
                 // One line per part — the caller deduplicates — so a part maps
@@ -350,7 +355,7 @@ public static class OrderEndpoints
                 await transaction.RollbackAsync(ct);
                 throw;
             }
-            catch (PostgresException e) when (e.SqlState == "23505" && attempt < 4)
+            catch (Exception e) when (e.Is(DatabaseRefusal.Unique) && attempt < 4)
             {
                 await transaction.RollbackAsync(ct);
             }

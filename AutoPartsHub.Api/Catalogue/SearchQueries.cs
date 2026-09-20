@@ -15,7 +15,7 @@ namespace AutoPartsHub.Api.Catalogue;
 ///
 /// The filters that do belong here are written so a null parameter turns its
 /// own clause off:
-/// <code>AND ({supplier}::text IS NULL OR s."slug" = {supplier})</code>
+/// <code>AND ({supplier} IS NULL OR s."slug" = {supplier})</code>
 /// Every combination is therefore the same statement with the same number of
 /// parameters, which is what lets a search with six optional filters stay one
 /// interpolated-string query — no SQL assembled from strings, and no path
@@ -30,7 +30,7 @@ namespace AutoPartsHub.Api.Catalogue;
 /// fuzzy fallback returns different columns from the exact match, which the
 /// comparison harness sees.
 /// </remarks>
-public sealed class SearchQueries(AutoPartsContext db)
+public sealed class SearchQueries(AutoPartsContext db, FullTextSearch fullText)
 {
     /// <summary>How many rows the query will consider before the endpoint narrows them.</summary>
     public const int MaxResults = 200;
@@ -73,7 +73,7 @@ public sealed class SearchQueries(AutoPartsContext db)
         var partType = rows.PartType is { Length: > 0 } chosen ? chosen : null;
 
         var counted = await db.Database.SqlQuery<CountedSearchRow>($"""
-            SELECT COUNT(*) OVER () ::int AS "Total",
+            SELECT TOP {limit} COUNT(*) OVER ()  AS "Total",
                    p."id" AS "Id", p."partNumber" AS "PartNumber", p."name" AS "Name",
                    p."description" AS "Description", p."stockDays" AS "StockDays",
                    p."basePrice" AS "BasePrice", p."supplierId" AS "SupplierId",
@@ -89,7 +89,11 @@ public sealed class SearchQueries(AutoPartsContext db)
                    bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    img."url" AS "ImageUrl", img."alt" AS "ImageAlt",
                    st."available" AS "Available",
-                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating",
+                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName",
+                   -- Both names travel; SupplierNaming picks one. Reading the
+                   -- code here costs nothing — it is on a row already joined —
+                   -- and the alternative is a second lookup per response.
+                   s."code" AS "SupplierCode", s."rating" AS "SupplierRating",
                    s."reliability" AS "SupplierReliability", s."acceptsReturns" AS "SupplierAcceptsReturns"
             FROM "Product" p
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
@@ -101,54 +105,54 @@ public sealed class SearchQueries(AutoPartsContext db)
             LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
-             AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-            LEFT JOIN LATERAL (
+             AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+            OUTER APPLY (
               SELECT pi."url", pi."alt"
               FROM "ProductImage" pi
               WHERE pi."productId" = p."id"
               ORDER BY pi."sortOrder" ASC
-              LIMIT 1
-            ) img ON true
-            LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+              OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            ) img
+            OUTER APPLY (
+              SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = true
-            ) st ON true
+              WHERE sl."productId" = p."id" AND w."active" = 1
+            ) st
             WHERE (
               -- No query: everything is reachable, and the filters below do the work.
-              {hasQuery}::bool IS NOT TRUE
-              OR p."id" = ANY({ids}::text[])
+              ({hasQuery} IS NULL OR {hasQuery} = 0)
+              OR p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
               -- Every token has to land somewhere, but not all in the same
               -- column — which is what lets "bosch brake pad" work, with the
               -- brand on one and the rest on another. Written as "no token
               -- fails to match", so the number of tokens is a value rather
               -- than a shape.
               OR NOT EXISTS (
-                SELECT 1 FROM unnest({tokens}::text[]) AS tok
+                SELECT 1 FROM (SELECT value COLLATE DATABASE_DEFAULT AS tok FROM OPENJSON({SqlList.Of(tokens)})) AS tok_rows
                 WHERE NOT (
-                  p."partNumber" ILIKE '%' || tok || '%'
-                  OR p."name" ILIKE '%' || tok || '%'
-                  OR COALESCE(p."description", '') ILIKE '%' || tok || '%'
-                  OR m."name" ILIKE '%' || tok || '%'
+                  p."partNumber" LIKE '%' + tok + '%'
+                  OR p."name" LIKE '%' + tok + '%'
+                  OR COALESCE(p."description", '') LIKE '%' + tok + '%'
+                  OR m."name" LIKE '%' + tok + '%'
                   OR EXISTS (
                     SELECT 1 FROM "Interchange" i
-                    WHERE i."sourceId" = p."id" AND i."targetPartNo" ILIKE '%' || tok || '%'
+                    WHERE i."sourceId" = p."id" AND i."targetPartNo" LIKE '%' + tok + '%'
                   )
                 )
               )
             )
-            AND ({variant}::text IS NULL OR EXISTS (
+            AND ({variant} IS NULL OR EXISTS (
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
             -- "Their parts" means the parts they OFFER, not the ones their offer
             -- happens to win. A supplier page listing only what we currently buy from
             -- them would hide half their range the day somebody undercut them.
-            AND ({supplier}::text IS NULL OR EXISTS (
+            AND ({supplier} IS NULL OR EXISTS (
               SELECT 1 FROM "SupplierOffer" so
               JOIN "Supplier" ss ON ss."id" = so."supplierId"
-              WHERE so."productId" = p."id" AND so."active" AND ss."active"
+              WHERE so."productId" = p."id" AND so."active" = 1 AND ss."active" = 1
                 AND ss."slug" = {supplier}
             ))
             -- A supplier who is switched off is not selling, so their parts
@@ -165,20 +169,22 @@ public sealed class SearchQueries(AutoPartsContext db)
             )
             -- The row filters. Each cancels itself when its parameter is null,
             -- so every combination is the same statement with the same holes.
-            AND ({system}::text IS NULL OR v."slug" = {system})
-            AND ({manufacturer}::text IS NULL OR lower(m."name") = lower({manufacturer}))
+            AND ({system} IS NULL OR v."slug" = {system})
+            AND ({manufacturer} IS NULL OR lower(m."name") = lower({manufacturer}))
             -- COALESCE rather than a bare comparison: an unrated supplier is
             -- NULL, and NULL >= 4 is null, which drops the row for a reason
             -- nobody reading it could name. Written this way the rule is
             -- legible — unrated counts as zero, so no minimum includes it.
-            AND ({minRating}::int IS NULL OR COALESCE(s."rating", 0) >= {minRating})
-            AND ({reliability}::text IS NULL OR s."reliability" = {reliability})
+            AND ({minRating} IS NULL OR COALESCE(s."rating", 0) >= {minRating})
+            AND ({reliability} IS NULL OR s."reliability" = {reliability})
             -- Only an explicit yes. A supplier whose return terms are
-            -- unrecorded is not evidence that they accept them, and IS TRUE
-            -- says so where a plain equality would leave a null to argue over.
-            AND ({returnsOnly}::bool IS NOT TRUE OR s."acceptsReturns" IS TRUE)
-            AND ({partType}::text[] IS NULL OR p."partType" = ANY({partType}::text[]))
-            LIMIT {limit}
+            -- unrecorded is not evidence that they accept them, so the
+            -- unrecorded case has to read as "no" rather than as a null that
+            -- argues with everything it is compared to. PostgreSQL said that
+            -- with IS TRUE; SQL Server has no such test, so the null is
+            -- handled where it arises.
+            AND (({returnsOnly} IS NULL OR {returnsOnly} = 0) OR (s."acceptsReturns" = 1))
+            AND ({SqlList.Of(partType)} IS NULL OR p."partType" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(partType)})))
             """).ToListAsync(ct);
 
         return new SearchPage(
@@ -231,33 +237,33 @@ public sealed class SearchQueries(AutoPartsContext db)
               LEFT JOIN "BestOffer" bo ON bo."productId" = p."id"
               LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
               WHERE (
-                {hasQuery}::bool IS NOT TRUE
-                OR p."id" = ANY({ids}::text[])
+                ({hasQuery} IS NULL OR {hasQuery} = 0)
+                OR p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(ids)}))
                 OR NOT EXISTS (
-                  SELECT 1 FROM unnest({tokens}::text[]) AS tok
+                  SELECT 1 FROM (SELECT value COLLATE DATABASE_DEFAULT AS tok FROM OPENJSON({SqlList.Of(tokens)})) AS tok_rows
                   WHERE NOT (
-                    p."partNumber" ILIKE '%' || tok || '%'
-                    OR p."name" ILIKE '%' || tok || '%'
-                    OR COALESCE(p."description", '') ILIKE '%' || tok || '%'
-                    OR m."name" ILIKE '%' || tok || '%'
+                    p."partNumber" LIKE '%' + tok + '%'
+                    OR p."name" LIKE '%' + tok + '%'
+                    OR COALESCE(p."description", '') LIKE '%' + tok + '%'
+                    OR m."name" LIKE '%' + tok + '%'
                     OR EXISTS (
                       SELECT 1 FROM "Interchange" i
-                      WHERE i."sourceId" = p."id" AND i."targetPartNo" ILIKE '%' || tok || '%'
+                      WHERE i."sourceId" = p."id" AND i."targetPartNo" LIKE '%' + tok + '%'
                     )
                   )
                 )
               )
-              AND ({variant}::text IS NULL OR EXISTS (
+              AND ({variant} IS NULL OR EXISTS (
                 SELECT 1 FROM "Fitment" fit
                 WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
               ))
               -- "Their parts" means the parts they OFFER, not the ones their offer
               -- happens to win. A supplier page listing only what we currently buy from
               -- them would hide half their range the day somebody undercut them.
-              AND ({supplier}::text IS NULL OR EXISTS (
+              AND ({supplier} IS NULL OR EXISTS (
                 SELECT 1 FROM "SupplierOffer" so
                 JOIN "Supplier" ss ON ss."id" = so."supplierId"
-                WHERE so."productId" = p."id" AND so."active" AND ss."active"
+                WHERE so."productId" = p."id" AND so."active" = 1 AND ss."active" = 1
                   AND ss."slug" = {supplier}
               ))
               -- A live offer from a live supplier, or no supplier relationship at all.
@@ -269,31 +275,31 @@ public sealed class SearchQueries(AutoPartsContext db)
               )
             ),
             in_system AS (
-              SELECT * FROM matched WHERE ({system}::text IS NULL OR "systemSlug" = {system})
+              SELECT * FROM matched WHERE ({system} IS NULL OR "systemSlug" = {system})
             )
             SELECT 'system' AS "Kind", "systemSlug" AS "Key", "systemName" AS "Label",
-                   COUNT(*)::int AS "Count"
+                   COUNT(*) AS "Count"
             FROM matched GROUP BY "systemSlug", "systemName"
             UNION ALL
-            SELECT 'brand', "manufacturerName", NULL, COUNT(*)::int FROM in_system
+            SELECT 'brand', "manufacturerName", NULL, COUNT(*) FROM in_system
             GROUP BY "manufacturerName"
             UNION ALL
             -- Per exact rating rather than per threshold, so a caller can build
             -- whichever thresholds it offers by summing downwards. Key 0 is
             -- unrated, kept visible so the gap is obvious rather than dropped.
-            SELECT 'rating', COALESCE("supplierRating", 0)::text, NULL, COUNT(*)::int FROM in_system
+            SELECT 'rating', COALESCE("supplierRating", 0), NULL, COUNT(*) FROM in_system
             GROUP BY COALESCE("supplierRating", 0)
             UNION ALL
-            SELECT 'reliability', "supplierReliability", NULL, COUNT(*)::int FROM in_system
+            SELECT 'reliability', "supplierReliability", NULL, COUNT(*) FROM in_system
             WHERE "supplierReliability" IS NOT NULL GROUP BY "supplierReliability"
             UNION ALL
             -- Counted only among parts that have a supplier at all, matching
             -- the reliability tally beside it: a part with nobody behind it is
             -- not evidence either way about returns.
-            SELECT 'returns', 'yes', NULL, COUNT(*)::int FROM in_system
-            WHERE "supplierReliability" IS NOT NULL AND "supplierAcceptsReturns" IS TRUE
+            SELECT 'returns', 'yes', NULL, COUNT(*) FROM in_system
+            WHERE "supplierReliability" IS NOT NULL AND ("supplierAcceptsReturns" = 1)
             UNION ALL
-            SELECT 'partType', "partType", NULL, COUNT(*)::int FROM in_system GROUP BY "partType"
+            SELECT 'partType', "partType", NULL, COUNT(*) FROM in_system GROUP BY "partType"
             """).ToListAsync(ct);
     }
 
@@ -320,7 +326,11 @@ public sealed class SearchQueries(AutoPartsContext db)
                    bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                    img."url" AS "ImageUrl", img."alt" AS "ImageAlt",
                    st."available" AS "Available",
-                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating",
+                   s."slug" AS "SupplierSlug", s."name" AS "SupplierName",
+                   -- Both names travel; SupplierNaming picks one. Reading the
+                   -- code here costs nothing — it is on a row already joined —
+                   -- and the alternative is a second lookup per response.
+                   s."code" AS "SupplierCode", s."rating" AS "SupplierRating",
                    s."reliability" AS "SupplierReliability", s."acceptsReturns" AS "SupplierAcceptsReturns"
             FROM "Product" p
             JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
@@ -332,32 +342,32 @@ public sealed class SearchQueries(AutoPartsContext db)
             LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
             LEFT JOIN "PriceListItem" pli
               ON pli."productId" = p."id"
-             AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-            LEFT JOIN LATERAL (
+             AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+            OUTER APPLY (
               SELECT pi."url", pi."alt"
               FROM "ProductImage" pi
               WHERE pi."productId" = p."id"
               ORDER BY pi."sortOrder" ASC
-              LIMIT 1
-            ) img ON true
-            LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+              OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            ) img
+            OUTER APPLY (
+              SELECT SUM(sl."quantity" - sl."reserved") AS "available"
               FROM "StockLevel" sl
               JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-              WHERE sl."productId" = p."id" AND w."active" = true
-            ) st ON true
-            WHERE p."id" = ANY({array}::text[])
-            AND ({variant}::text IS NULL OR EXISTS (
+              WHERE sl."productId" = p."id" AND w."active" = 1
+            ) st
+            WHERE p."id" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
+            AND ({variant} IS NULL OR EXISTS (
               SELECT 1 FROM "Fitment" fit
               WHERE fit."productId" = p."id" AND fit."variantId" = {variant}
             ))
             -- "Their parts" means the parts they OFFER, not the ones their offer
             -- happens to win. A supplier page listing only what we currently buy from
             -- them would hide half their range the day somebody undercut them.
-            AND ({supplier}::text IS NULL OR EXISTS (
+            AND ({supplier} IS NULL OR EXISTS (
               SELECT 1 FROM "SupplierOffer" so
               JOIN "Supplier" ss ON ss."id" = so."supplierId"
-              WHERE so."productId" = p."id" AND so."active" AND ss."active"
+              WHERE so."productId" = p."id" AND so."active" = 1 AND ss."active" = 1
                 AND ss."slug" = {supplier}
             ))
             -- Same rule as the search above. Reached by id rather than by
@@ -384,7 +394,7 @@ public sealed class SearchQueries(AutoPartsContext db)
             SELECT "sourceId" AS "SourceId", "targetPartNo" AS "TargetPartNo",
                    "targetManufacturer" AS "TargetManufacturer", "isOEM" AS "IsOem"
             FROM "Interchange"
-            WHERE "sourceId" = ANY({array}::text[])
+            WHERE "sourceId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
             """).ToListAsync(ct);
     }
 
@@ -393,77 +403,219 @@ public sealed class SearchQueries(AutoPartsContext db)
     /// matches the query once separators are ignored.
     /// </summary>
     /// <remarks>
-    /// Done in SQL because the normalised form is not stored. That means a
-    /// scan: fine for a catalogue this size, but if it grows this wants a
-    /// normalised column with an index on it rather than regexp_replace per
-    /// row.
+    /// The normalised form is a stored column now — see
+    /// <c>AutoPartsContext.SearchIndexSql</c> — so this compares a column
+    /// rather than recomputing one per row. It is still a scan, because the
+    /// contract here is "contains" and no index answers a leading wildcard;
+    /// what changed is that the scan reads a value instead of running a
+    /// regular expression to derive one. The near-miss search below, which is
+    /// allowed to be a prefix, seeks.
     /// </remarks>
     public async Task<List<string>> IdsMatchingNormalisedPartNumberAsync(
         string q, CancellationToken ct = default)
     {
         var needle = PartNumbers.Normalise(q);
-        if (needle.Length < 3) return [];
+        if (needle.Length < ShortestNeedle) return [];
         var pattern = $"%{needle}%";
 
         return await db.Database.SqlQuery<string>($"""
             SELECT DISTINCT p."id" AS "Value"
             FROM "Product" p
             LEFT JOIN "Interchange" i ON i."sourceId" = p."id"
-            WHERE regexp_replace(upper(p."partNumber"), '[^A-Z0-9]', '', 'g') LIKE {pattern}
-               OR regexp_replace(upper(i."targetPartNo"), '[^A-Z0-9]', '', 'g') LIKE {pattern}
+            WHERE p."partNumberNormalised" LIKE {pattern}
+               OR i."targetPartNoNormalised" LIKE {pattern}
             """).ToListAsync(ct);
     }
 
-    /// <summary>Below this a trigram match is more noise than help — tuned
-    /// against the catalogue, where a genuine typo scores about 0.6 and up.</summary>
-    private const double FuzzyThreshold = 0.45;
+    /// <summary>
+    /// Below this a near miss is more noise than help: two characters of a
+    /// part number reach most of the catalogue.
+    /// </summary>
+    private const int ShortestNeedle = 3;
 
     /// <summary>
-    /// Closest products to a query that matched nothing exactly, ordered by how
-    /// close they are.
+    /// How many near misses are worth offering.
     /// </summary>
     /// <remarks>
-    /// <c>word_similarity</c> compares the query against the best-matching run
-    /// of words in the target rather than the whole string, so "brak pad"
-    /// still scores against "Brake pad set, front" without the rest of the
-    /// name dragging it down. Needs pg_trgm — see the trigram migration.
+    /// Small on purpose, and not only for the page: it is the limit each lane
+    /// is capped at, so "how much work can an empty search cause" has an
+    /// answer that does not depend on the size of the catalogue. Twenty-five
+    /// is what the similarity scoring returned, kept so the page that presents
+    /// them is unchanged.
+    /// </remarks>
+    private const int NearMisses = 25;
+
+    /// <summary>
+    /// Closest products to a query that matched nothing exactly, ordered by
+    /// how close they are.
+    /// </summary>
+    /// <remarks>
+    /// This used to be pg_trgm: <c>word_similarity</c> against every product
+    /// name, every manufacturer name and every part number, scored, filtered
+    /// at 0.45 and sorted. It read the whole table on every search that came
+    /// up empty — which is precisely the search a customer repeats, having
+    /// typed it wrong once. SQL Server has no equivalent function, and T-067
+    /// does not ask for one: two seeks, no leading wildcard, a small limit.
+    ///
+    /// TWO LANES
+    /// ---------
+    /// A part number and a name are wrong in different ways and are reached by
+    /// different indexes, so they are asked separately rather than scored
+    /// together. Numbers first: three normalised characters of a part number
+    /// agreeing is a deliberate act, while three characters of a name agreeing
+    /// is a coincidence the catalogue is full of.
+    ///
+    /// WHAT WAS LOST
+    /// -------------
+    /// Trigram similarity matched a typo in the MIDDLE of a word — "brkae pad"
+    /// scored against "Brake pad set, front". Neither lane here does: a prefix
+    /// seek and a full-text prefix term both need the start to be right. That
+    /// is the trade the task makes, and it is the same property as the scan
+    /// going away, seen from the other side. The shapes that still work are
+    /// truncation ("brake pa", "0 986 42") and one wrong word among right
+    /// ones, which is most of what a search box receives.
     /// </remarks>
     public async Task<List<string>> IdsByFuzzyMatchAsync(string q, CancellationToken ct = default)
     {
-        var needle = q.Trim().ToLowerInvariant();
-        if (needle.Length < 3) return [];
+        var found = new List<string>();
+
+        found.AddRange(await IdsByPartNumberPrefixAsync(q, ct));
+        found.AddRange(await IdsByNameAsync(q, ct));
+
+        return found.Distinct().Take(NearMisses).ToList();
+    }
+
+    /// <summary>Products whose part number, or a cross-reference to one,
+    /// starts with what was typed.</summary>
+    /// <remarks>
+    /// Both sides seek their normalised column. The grouping is not
+    /// decoration: a product can be reached by its own number and by a
+    /// cross-reference to it in the same query, and the caller reads this list
+    /// as a ranking, so the same id arriving twice would spend two of the
+    /// twenty-five places on one product.
+    /// </remarks>
+    private async Task<List<string>> IdsByPartNumberPrefixAsync(string q, CancellationToken ct)
+    {
+        var needle = PartNumbers.Normalise(q);
+        if (needle.Length < ShortestNeedle) return [];
+        var prefix = $"{needle}%";
 
         return await db.Database.SqlQuery<string>($"""
-            SELECT p."id" AS "Value",
-                   GREATEST(
-                     word_similarity({needle}, lower(p."name")),
-                     word_similarity({needle}, lower(m."name")),
-                     similarity(lower(p."partNumber"), {needle})
-                   ) AS score
-            FROM "Product" p
-            JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
-            WHERE GREATEST(
-                    word_similarity({needle}, lower(p."name")),
-                    word_similarity({needle}, lower(m."name")),
-                    similarity(lower(p."partNumber"), {needle})
-                  ) >= {FuzzyThreshold}
-            -- Part number breaks the remaining tie. Two parts can score the
-            -- same AND be called the same thing — this catalogue has two
-            -- "Brake pad set, front" that tie at 0.5 on "brak pd" — and
-            -- without this they come back in whatever order the heap holds
-            -- them, which changes when unrelated rows are rewritten. The
-            -- ranked search already breaks ties this way; the fuzzy fallback
-            -- was missed.
-            ORDER BY score DESC, p."name" ASC, p."partNumber" ASC
-            LIMIT 25
+            SELECT TOP ({NearMisses}) "Value"
+            FROM (
+                SELECT p."id" AS "Value", p."partNumberNormalised" AS "Sort",
+                       p."partNumber" AS "Tie"
+                FROM "Product" p
+                WHERE p."partNumberNormalised" LIKE {prefix}
+                UNION ALL
+                SELECT i."sourceId", i."targetPartNoNormalised", i."targetPartNo"
+                FROM "Interchange" i
+                WHERE i."targetPartNoNormalised" LIKE {prefix}
+            ) hit
+            GROUP BY "Value"
+            -- Shortest completion first, so the number that is nearly the one
+            -- typed outranks the one that merely begins the same way. Part
+            -- number breaks the tie for the same reason it does in the ranked
+            -- search: two products can carry the same normalised number.
+            ORDER BY MIN("Sort") ASC, MIN("Tie") ASC
             """).ToListAsync(ct);
     }
+
+    /// <summary>Products whose name, or whose manufacturer's name, is close to
+    /// what was typed.</summary>
+    /// <remarks>
+    /// Which lane runs depends on the deployment rather than on the query —
+    /// see <see cref="FullTextSearch"/>. Both seek; full text reaches a word
+    /// anywhere in a name, and its absence reaches only the start of one.
+    /// </remarks>
+    private async Task<List<string>> IdsByNameAsync(string q, CancellationToken ct)
+    {
+        var needle = q.Trim();
+        if (needle.Length < ShortestNeedle) return [];
+
+        var prefix = $"{needle}%";
+        var terms = FullTextSearch.TermsFor(needle);
+
+        return terms is not null && await fullText.IsIndexedAsync(ct)
+            ? await IdsByIndexedNameAsync(terms, prefix, ct)
+            : await IdsByNamePrefixAsync(prefix, ct);
+    }
+
+    /// <summary>The name lane on an engine with no full-text index.</summary>
+    /// <remarks>
+    /// The manufacturer half is a seek whether or not full text exists —
+    /// Manufacturer is small and its name is uniquely indexed — so it is the
+    /// same statement in both lanes.
+    /// </remarks>
+    private Task<List<string>> IdsByNamePrefixAsync(string prefix, CancellationToken ct) =>
+        db.Database.SqlQuery<string>($"""
+            SELECT TOP ({NearMisses}) "Value"
+            FROM (
+                SELECT p."id" AS "Value", p."name" AS "Name", p."partNumber" AS "PartNumber"
+                FROM "Product" p
+                WHERE p."name" LIKE {prefix}
+                UNION ALL
+                SELECT p."id", p."name", p."partNumber"
+                FROM "Product" p
+                JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
+                WHERE m."name" LIKE {prefix}
+            ) hit
+            GROUP BY "Value"
+            ORDER BY MIN("Name") ASC, MIN("PartNumber") ASC
+            """).ToListAsync(ct);
+
+    /// <summary>The name lane where the engine has a full-text index.</summary>
+    /// <remarks>
+    /// <c>CONTAINSTABLE</c> rather than a <c>CONTAINS</c> predicate, because
+    /// it returns a RANK and the caller reads this list as an ordering. It
+    /// carries the same limit of twenty-five, so the index is asked for a page
+    /// rather than for everything that matched.
+    ///
+    /// READ, NOT RUN. LocalDB — which every test in this repository runs
+    /// against — cannot host Full-Text Search:
+    /// <c>SERVERPROPERTY('IsFullTextInstalled')</c> answers 0 and no edition
+    /// of it answers otherwise. So this statement is the one part of the
+    /// search that has not been executed against an engine. The lane beside it
+    /// has, <see cref="FullTextSearch.IsIndexedAsync"/> is what decides which
+    /// one a deployment gets, and the migration that would create the index
+    /// declines to on an instance without the component. When the hosting
+    /// decision lands (BLK-003) on an instance that has it, this is the
+    /// statement to exercise first.
+    /// </remarks>
+    private Task<List<string>> IdsByIndexedNameAsync(string terms, string prefix, CancellationToken ct) =>
+        db.Database.SqlQuery<string>($"""
+            SELECT TOP ({NearMisses}) "Value"
+            FROM (
+                SELECT p."id" AS "Value", ft."RANK" AS "Rank", p."name" AS "Name",
+                       p."partNumber" AS "PartNumber"
+                FROM CONTAINSTABLE("Product", ("name"), {terms}, {NearMisses}) ft
+                JOIN "Product" p ON p."id" = ft."KEY"
+                UNION ALL
+                SELECT p."id", 0, p."name", p."partNumber"
+                FROM "Product" p
+                JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
+                WHERE m."name" LIKE {prefix}
+            ) hit
+            GROUP BY "Value"
+            ORDER BY MAX("Rank") DESC, MIN("Name") ASC, MIN("PartNumber") ASC
+            """).ToListAsync(ct);
 
     public Task<string?> SystemNameBySlugAsync(string slug, CancellationToken ct = default) =>
         db.VehicleSystems.Where(v => v.Slug == slug).Select(v => v.Name).FirstOrDefaultAsync(ct);
 
-    public Task<string?> SupplierNameBySlugAsync(string slug, CancellationToken ct = default) =>
-        db.Suppliers.Where(s => s.Slug == slug).Select(s => s.Name).FirstOrDefaultAsync(ct);
+    /// <summary>
+    /// What the supplier filter shows it is doing — both names, so the caller
+    /// can publish whichever <see cref="SupplierNaming"/> allows.
+    /// </summary>
+    /// <remarks>
+    /// Returns the pair rather than a resolved name because the label is
+    /// built where the role is known, and a query that took the role would be
+    /// a second place the anonymity rule lived.
+    /// </remarks>
+    public Task<SupplierNames?> SupplierNamesBySlugAsync(string slug, CancellationToken ct = default) =>
+        db.Suppliers.Where(s => s.Slug == slug)
+            .Select(s => new SupplierNames(s.Name, s.Code))
+            .FirstOrDefaultAsync(ct);
 
     /// <summary>"BMW 3 Series (E90) 320d 2.0" — what the vehicle filter shows it is doing.</summary>
     public async Task<string?> VariantLabelAsync(string variantId, CancellationToken ct = default) =>
@@ -515,6 +667,8 @@ public record SearchRow(
     int? Available,
     string? SupplierSlug,
     string? SupplierName,
+    /// <summary>The opaque handle a customer sees instead of the name.</summary>
+    string? SupplierCode,
     int? SupplierRating,
     string? SupplierReliability,
     bool? SupplierAcceptsReturns) : IPriceable;
@@ -593,6 +747,8 @@ public record CountedSearchRow(
     int? Available,
     string? SupplierSlug,
     string? SupplierName,
+    /// <summary>The opaque handle a customer sees instead of the name.</summary>
+    string? SupplierCode,
     int? SupplierRating,
     string? SupplierReliability,
     bool? SupplierAcceptsReturns)
@@ -603,7 +759,8 @@ public record CountedSearchRow(
         ManufacturerName, SystemName, SystemSlug, ListPrice, ListRowMarkupPercent,
         OfferPrice, OfferSupplierId,
         ImageUrl, ImageAlt, Available,
-        SupplierSlug, SupplierName, SupplierRating, SupplierReliability, SupplierAcceptsReturns);
+        SupplierSlug, SupplierName, SupplierCode, SupplierRating, SupplierReliability,
+        SupplierAcceptsReturns);
 }
 
 /// <summary>One facet tally. <c>Label</c> carries the system's name; nothing else needs one.</summary>

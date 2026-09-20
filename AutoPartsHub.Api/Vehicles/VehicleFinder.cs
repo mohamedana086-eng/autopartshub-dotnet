@@ -44,7 +44,22 @@ public sealed class VehicleFinder(AutoPartsContext db)
         var region = f.Region;
 
         return await db.Database.SqlQuery<FinderOption>($"""
-            WITH rows AS (
+            -- Every year a vehicle in this catalogue could be from, as rows.
+            --
+            -- Numbered off a system view rather than generated: SQL Server's
+            -- GENERATE_SERIES is not on every edition, and a recursive CTE
+            -- would run into the hundred-level default the moment the range
+            -- passed a century. sys.all_objects has thousands of rows in every
+            -- database and is only being counted, not read.
+            WITH years AS (
+              -- CAST because ROW_NUMBER is bigint and a year is not. Left as
+              -- bigint it decides the type of the whole union below, where
+              -- every other branch contributes a name.
+              SELECT TOP (200)
+                     CAST(1899 + ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS int) AS "year"
+              FROM sys.all_objects
+            ),
+            candidates AS (
               SELECT vv."id" AS "variantId",
                      mk."name" AS "makeName",
                      mo."name" AS "modelName",
@@ -57,85 +72,102 @@ public sealed class VehicleFinder(AutoPartsContext db)
                      -- The nine filters, as answers rather than as a WHERE
                      -- clause. Keeping them per row is what lets each list
                      -- below read the eight that are not its own.
-                     ({make}::text IS NULL OR mk."name" = {make}) AS "fMake",
-                     ({series}::text IS NULL OR mo."series" = {series} OR mo."series" IS NULL) AS "fSeries",
-                     ({model}::text IS NULL OR mo."name" = {model}) AS "fModel",
-                     ({year}::int IS NULL
-                       OR (vv."yearFrom" <= {year} AND COALESCE(vv."yearTo", 9999) >= {year})) AS "fYear",
-                     ({bodyType}::text IS NULL OR vv."bodyType" = {bodyType} OR vv."bodyType" IS NULL) AS "fBody",
-                     ({steeringSide}::text IS NULL OR vv."steeringSide" = {steeringSide} OR vv."steeringSide" IS NULL) AS "fSteering",
-                     ({transmission}::text IS NULL OR vv."transmission" = {transmission} OR vv."transmission" IS NULL) AS "fTransmission",
-                     ({region}::text IS NULL OR vv."region" = {region} OR vv."region" IS NULL) AS "fRegion",
-                     ({engine}::text IS NULL OR COALESCE(vv."engineCode", vv."name") = {engine}) AS "fEngine"
+                     CASE WHEN {make} IS NULL OR mk."name" = {make} THEN 1 ELSE 0 END AS "fMake",
+                     CASE WHEN {series} IS NULL OR mo."series" = {series} OR mo."series" IS NULL THEN 1 ELSE 0 END AS "fSeries",
+                     CASE WHEN {model} IS NULL OR mo."name" = {model} THEN 1 ELSE 0 END AS "fModel",
+                     CASE WHEN {year} IS NULL
+                            OR (vv."yearFrom" <= {year} AND COALESCE(vv."yearTo", 9999) >= {year})
+                          THEN 1 ELSE 0 END AS "fYear",
+                     CASE WHEN {bodyType} IS NULL OR vv."bodyType" = {bodyType} OR vv."bodyType" IS NULL THEN 1 ELSE 0 END AS "fBody",
+                     CASE WHEN {steeringSide} IS NULL OR vv."steeringSide" = {steeringSide} OR vv."steeringSide" IS NULL THEN 1 ELSE 0 END AS "fSteering",
+                     CASE WHEN {transmission} IS NULL OR vv."transmission" = {transmission} OR vv."transmission" IS NULL THEN 1 ELSE 0 END AS "fTransmission",
+                     CASE WHEN {region} IS NULL OR vv."region" = {region} OR vv."region" IS NULL THEN 1 ELSE 0 END AS "fRegion",
+                     CASE WHEN {engine} IS NULL OR COALESCE(vv."engineCode", vv."name") = {engine} THEN 1 ELSE 0 END AS "fEngine"
               FROM "VehicleVariant" vv
               JOIN "VehicleModel" mo ON mo."id" = vv."modelId"
               JOIN "VehicleMake" mk ON mk."id" = mo."makeId"
             )
-            SELECT 'make' AS "Field", "makeName" AS "Value", COUNT(*)::int AS "Vehicles"
-            FROM rows
-            WHERE "fSeries" AND "fModel" AND "fYear" AND "fBody" AND "fSteering"
-              AND "fTransmission" AND "fRegion" AND "fEngine"
+            SELECT 'make' AS "Field", "makeName" AS "Value", COUNT(*) AS "Vehicles"
+            FROM candidates
+            WHERE "fSeries" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fBody" = 1 AND "fSteering" = 1
+              AND "fTransmission" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY "makeName"
 
             UNION ALL
-            SELECT 'series', "series", COUNT(*)::int FROM rows
+            SELECT 'series', "series", COUNT(*) FROM candidates
             WHERE "series" IS NOT NULL
-              AND "fMake" AND "fModel" AND "fYear" AND "fBody" AND "fSteering"
-              AND "fTransmission" AND "fRegion" AND "fEngine"
+              AND "fMake" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fBody" = 1 AND "fSteering" = 1
+              AND "fTransmission" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY "series"
 
             UNION ALL
-            SELECT 'model', "modelName", COUNT(*)::int FROM rows
-            WHERE "fMake" AND "fSeries" AND "fYear" AND "fBody" AND "fSteering"
-              AND "fTransmission" AND "fRegion" AND "fEngine"
+            SELECT 'model', "modelName", COUNT(*) FROM candidates
+            WHERE "fMake" = 1 AND "fSeries" = 1 AND "fYear" = 1 AND "fBody" = 1 AND "fSteering" = 1
+              AND "fTransmission" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY "modelName"
 
             UNION ALL
             -- A variant covers a range of years, so the options are the years
             -- those ranges actually reach — expanded here rather than offering
             -- a bare "from" that no customer thinks in.
-            SELECT 'year', y."year"::text, COUNT(*)::int
-            FROM rows
-            JOIN LATERAL generate_series(
-              rows."yearFrom",
-              LEAST(COALESCE(rows."yearTo", 9999), EXTRACT(YEAR FROM now())::int + 1)
-            ) AS y("year") ON true
-            WHERE "fMake" AND "fSeries" AND "fModel" AND "fBody" AND "fSteering"
-              AND "fTransmission" AND "fRegion" AND "fEngine"
+            -- The year is the one option that is not already text, and the
+            -- branches of a UNION do not each keep their own type: SQL Server
+            -- picks the one with the highest precedence and converts the rest
+            -- to it, so an uncast year here turns every make, model and engine
+            -- name in the result into a failed conversion to bigint. The
+            -- PostgreSQL this came from carried the cast; it was dropped as
+            -- one of the redundant ones, and it is not.
+            SELECT 'year', CAST(y."year" AS nvarchar(400)), COUNT(*)
+            FROM candidates
+            -- PostgreSQL expands the range with LATERAL generate_series. SQL
+            -- Server's GENERATE_SERIES was the obvious replacement and is not
+            -- available on every edition — this build refuses it at
+            -- compatibility level 170 — so the years come from `years` above,
+            -- which needs nothing but a table with enough rows in it.
+            --
+            -- A join rather than an APPLY, because the series no longer
+            -- depends on the outer row: it is every year, narrowed to the
+            -- variant's range by the condition.
+            JOIN years y
+              ON y."year" >= candidates."yearFrom"
+             AND y."year" <= LEAST(COALESCE(candidates."yearTo", 9999),
+                                   YEAR(SYSUTCDATETIME()) + 1)
+            WHERE "fMake" = 1 AND "fSeries" = 1 AND "fModel" = 1 AND "fBody" = 1 AND "fSteering" = 1
+              AND "fTransmission" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY y."year"
 
             UNION ALL
-            SELECT 'bodyType', "bodyType", COUNT(*)::int FROM rows
+            SELECT 'bodyType', "bodyType", COUNT(*) FROM candidates
             WHERE "bodyType" IS NOT NULL
-              AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fSteering"
-              AND "fTransmission" AND "fRegion" AND "fEngine"
+              AND "fMake" = 1 AND "fSeries" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fSteering" = 1
+              AND "fTransmission" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY "bodyType"
 
             UNION ALL
-            SELECT 'steeringSide', "steeringSide", COUNT(*)::int FROM rows
+            SELECT 'steeringSide', "steeringSide", COUNT(*) FROM candidates
             WHERE "steeringSide" IS NOT NULL
-              AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
-              AND "fTransmission" AND "fRegion" AND "fEngine"
+              AND "fMake" = 1 AND "fSeries" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fBody" = 1
+              AND "fTransmission" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY "steeringSide"
 
             UNION ALL
-            SELECT 'transmission', "transmission", COUNT(*)::int FROM rows
+            SELECT 'transmission', "transmission", COUNT(*) FROM candidates
             WHERE "transmission" IS NOT NULL
-              AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
-              AND "fSteering" AND "fRegion" AND "fEngine"
+              AND "fMake" = 1 AND "fSeries" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fBody" = 1
+              AND "fSteering" = 1 AND "fRegion" = 1 AND "fEngine" = 1
             GROUP BY "transmission"
 
             UNION ALL
-            SELECT 'region', "region", COUNT(*)::int FROM rows
+            SELECT 'region', "region", COUNT(*) FROM candidates
             WHERE "region" IS NOT NULL
-              AND "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
-              AND "fSteering" AND "fTransmission" AND "fEngine"
+              AND "fMake" = 1 AND "fSeries" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fBody" = 1
+              AND "fSteering" = 1 AND "fTransmission" = 1 AND "fEngine" = 1
             GROUP BY "region"
 
             UNION ALL
-            SELECT 'engine', "engine", COUNT(*)::int FROM rows
-            WHERE "fMake" AND "fSeries" AND "fModel" AND "fYear" AND "fBody"
-              AND "fSteering" AND "fTransmission" AND "fRegion"
+            SELECT 'engine', "engine", COUNT(*) FROM candidates
+            WHERE "fMake" = 1 AND "fSeries" = 1 AND "fModel" = 1 AND "fYear" = 1 AND "fBody" = 1
+              AND "fSteering" = 1 AND "fTransmission" = 1 AND "fRegion" = 1
             GROUP BY "engine"
 
             ORDER BY 1, 2
@@ -162,7 +194,7 @@ public sealed class VehicleFinder(AutoPartsContext db)
         var region = f.Region;
 
         var rows = await db.Database.SqlQuery<CountedFinderVehicle>($"""
-            SELECT COUNT(*) OVER () ::int AS "Total",
+            SELECT COUNT(*) OVER ()  AS "Total",
                    vv."id" AS "VariantId",
                    mk."name" AS "MakeName", mo."name" AS "ModelName", mo."series" AS "Series",
                    vv."name" AS "VariantName", vv."yearFrom" AS "YearFrom", vv."yearTo" AS "YearTo",
@@ -172,19 +204,19 @@ public sealed class VehicleFinder(AutoPartsContext db)
             FROM "VehicleVariant" vv
             JOIN "VehicleModel" mo ON mo."id" = vv."modelId"
             JOIN "VehicleMake" mk ON mk."id" = mo."makeId"
-            WHERE ({make}::text IS NULL OR mk."name" = {make})
-              AND ({series}::text IS NULL OR mo."series" = {series} OR mo."series" IS NULL)
-              AND ({model}::text IS NULL OR mo."name" = {model})
-              AND ({year}::int IS NULL
+            WHERE ({make} IS NULL OR mk."name" = {make})
+              AND ({series} IS NULL OR mo."series" = {series} OR mo."series" IS NULL)
+              AND ({model} IS NULL OR mo."name" = {model})
+              AND ({year} IS NULL
                 OR (vv."yearFrom" <= {year} AND COALESCE(vv."yearTo", 9999) >= {year}))
-              AND ({bodyType}::text IS NULL OR vv."bodyType" = {bodyType} OR vv."bodyType" IS NULL)
-              AND ({steeringSide}::text IS NULL OR vv."steeringSide" = {steeringSide} OR vv."steeringSide" IS NULL)
-              AND ({transmission}::text IS NULL OR vv."transmission" = {transmission} OR vv."transmission" IS NULL)
-              AND ({region}::text IS NULL OR vv."region" = {region} OR vv."region" IS NULL)
-              AND ({engine}::text IS NULL OR COALESCE(vv."engineCode", vv."name") = {engine})
+              AND ({bodyType} IS NULL OR vv."bodyType" = {bodyType} OR vv."bodyType" IS NULL)
+              AND ({steeringSide} IS NULL OR vv."steeringSide" = {steeringSide} OR vv."steeringSide" IS NULL)
+              AND ({transmission} IS NULL OR vv."transmission" = {transmission} OR vv."transmission" IS NULL)
+              AND ({region} IS NULL OR vv."region" = {region} OR vv."region" IS NULL)
+              AND ({engine} IS NULL OR COALESCE(vv."engineCode", vv."name") = {engine})
             -- Ordered so the same search reads the same twice running.
             ORDER BY mk."name" ASC, mo."name" ASC, vv."yearFrom" ASC, vv."name" ASC, vv."id" ASC
-            LIMIT {limit}
+            OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY
             """).ToListAsync(ct);
 
         return new FinderPage(

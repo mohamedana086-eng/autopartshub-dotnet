@@ -1,3 +1,5 @@
+using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,23 +20,36 @@ public static class SupplierPageEndpoints
     public static void MapSupplierPageEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/suppliers/{slug}", async (
-            string slug, AutoPartsContext db, CancellationToken ct) =>
+            string slug, HttpContext http, AutoPartsContext db, SessionTokens tokens,
+            CancellationToken ct) =>
         {
+            // Nothing here is priced, so the role comes from the signed cookie
+            // rather than from an account load this page has no other use for.
+            var naming = SupplierNaming.For(http, tokens);
+
             var supplier = (await db.Database.SqlQuery<SupplierPageRow>($"""
                 SELECT s."id" AS "Id", s."code" AS "Code", s."slug" AS "Slug", s."name" AS "Name",
                        s."description" AS "Description", s."reliability" AS "Reliability",
                        s."rating" AS "Rating", s."acceptsReturns" AS "AcceptsReturns",
                        s."country" AS "Country", s."guaranteeMonths" AS "GuaranteeMonths",
-                       COUNT(p."id")::int AS "ProductCount",
-                       MIN(p."stockDays")::int AS "FastestDelivery"
+                       COUNT(p."id") AS "ProductCount",
+                       MIN(p."stockDays") AS "FastestDelivery"
                 FROM "Supplier" s
                 LEFT JOIN "Product" p ON p."supplierId" = s."id"
                 WHERE s."slug" = {slug}
                   -- Not found rather than empty: a supplier waiting for
                   -- approval should not have a public page that says who they
                   -- are and lists nothing.
-                  AND s."active"
-                GROUP BY s."id"
+                  AND s."active" = 1
+                -- Every selected column, not just the key. PostgreSQL works out
+                -- that the rest are functionally dependent on the primary key
+                -- and lets `GROUP BY s."id"` stand for all of them; SQL Server
+                -- does not make that inference and wants them named. Same
+                -- grouping either way — one row per supplier — because the key
+                -- is still in the list and determines the rest.
+                GROUP BY s."id", s."code", s."slug", s."name", s."description",
+                         s."reliability", s."rating", s."acceptsReturns",
+                         s."country", s."guaranteeMonths"
                 """).ToListAsync(ct)).FirstOrDefault();
 
             if (supplier is null) return Results.NotFound(new { error = "No such supplier." });
@@ -43,7 +58,7 @@ public static class SupplierPageEndpoints
             // the same way here as they do on the other API — a .NET string
             // sort and a Postgres collation do not agree about case.
             var systems = await db.Database.SqlQuery<SystemCountRow>($"""
-                SELECT v."slug" AS "Slug", v."name" AS "Name", COUNT(*)::int AS "Count"
+                SELECT v."slug" AS "Slug", v."name" AS "Name", COUNT(*) AS "Count"
                 FROM "Product" p
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
                 WHERE p."supplierId" = {supplier.Id}
@@ -52,7 +67,7 @@ public static class SupplierPageEndpoints
                 """).ToListAsync(ct);
 
             var brands = await db.Database.SqlQuery<BrandCountRow>($"""
-                SELECT m."name" AS "Name", COUNT(*)::int AS "Count"
+                SELECT m."name" AS "Name", COUNT(*) AS "Count"
                 FROM "Product" p
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 WHERE p."supplierId" = {supplier.Id}
@@ -69,7 +84,7 @@ public static class SupplierPageEndpoints
                     id = supplier.Id,
                     code = supplier.Code,
                     slug = supplier.Slug,
-                    name = supplier.Name,
+                    name = naming.Of(supplier.Name, supplier.Code),
                     description = supplier.Description,
                     reliability = supplier.Reliability,
                     rating = supplier.Rating,

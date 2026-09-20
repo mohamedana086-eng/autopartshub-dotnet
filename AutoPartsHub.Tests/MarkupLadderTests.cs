@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Pricing;
 
 namespace AutoPartsHub.Tests;
 

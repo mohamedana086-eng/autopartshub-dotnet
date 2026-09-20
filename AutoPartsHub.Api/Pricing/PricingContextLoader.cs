@@ -1,5 +1,6 @@
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Pricing;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Pricing;
@@ -28,11 +29,19 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         var categoryId = session?.CategoryId;
 
         var account = (await db.Database.SqlQuery<AccountRow>($"""
-            SELECT c."discountPercent" AS "DiscountPercent",
+            SELECT TOP 1 c."discountPercent" AS "DiscountPercent",
                    -- Who is asking, for the dimensions that describe the caller
                    -- rather than the part.
                    c."id" AS "ClientId", c."role" AS "ClientRole",
                    c."salesManagerId" AS "SalesManagerId", c."city" AS "City",
+                   -- Which outlet they buy through, for the منفذ البيع
+                   -- dimension. Null for the many who buy through none, which
+                   -- makes a rule naming outlets simply not apply to them.
+                   c."outletId" AS "OutletId",
+                   -- Their agreed delivery terms, for the شروط التسليم
+                   -- dimension. On the account because pricing happens while
+                   -- browsing, long before an order has any.
+                   c."deliveryTerms" AS "DeliveryTerms",
                    cat."id" AS "CategoryId",
                    cat."name" AS "CategoryName",
                    cat."markupPercent" AS "CategoryMarkupPercent",
@@ -42,14 +51,18 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    COALESCE(cur."code", base."code") AS "CurrencyCode",
                    COALESCE(cur."symbol", base."symbol") AS "CurrencySymbol",
                    COALESCE(cur."rate", base."rate") AS "CurrencyRate"
-            FROM (SELECT 1) AS anchor
+            -- The one-row anchor every left join hangs off, so an anonymous
+            -- visitor still comes back with a tier and a currency rather than
+            -- with no row at all. PostgreSQL is happy to leave the column
+            -- unnamed; SQL Server requires a derived table to name its columns,
+            -- and the name is never read.
+            FROM (SELECT 1 AS "one") AS anchor
             LEFT JOIN "Client" c ON c."id" = {userId}
             LEFT JOIN "ClientCategory" cat
                    ON cat."id" = {categoryId}
-                   OR ({categoryId}::text IS NULL AND cat."name" = 'Retail')
-            LEFT JOIN "Currency" cur ON cur."id" = c."currencyId" AND cur."active"
-            LEFT JOIN "Currency" base ON base."isBase"
-            LIMIT 1
+                   OR ({categoryId} IS NULL AND cat."name" = 'Retail')
+            LEFT JOIN "Currency" cur ON cur."id" = c."currencyId" AND cur."active" = 1
+            LEFT JOIN "Currency" base ON base."isBase" = 1
             """).ToListAsync(ct)).FirstOrDefault();
 
         // Ordered by id, because the engine sorts by specificity then priority
@@ -69,15 +82,19 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    -- As epoch milliseconds, not as dates. The two ports have
                    -- to agree on a window to the millisecond, and neither
                    -- timezone handling nor date parsing is the same in both
-                   -- languages — whereas a number is a number. AT TIME ZONE
-                   -- 'UTC' pins down what a bare TIMESTAMP means rather than
-                   -- leaving it to the driver.
-                   (EXTRACT(EPOCH FROM "startsAt" AT TIME ZONE 'UTC') * 1000)::bigint
+                   -- languages — whereas a number is a number.
+                   --
+                   -- PostgreSQL needed AT TIME ZONE 'UTC' here to pin down what
+                   -- a bare TIMESTAMP meant rather than leaving it to the
+                   -- driver. Nothing pins it down now because there is nothing
+                   -- left to pin: every datetime2 in this schema is UTC, and
+                   -- DATEDIFF_BIG from the epoch reads it as one.
+                   DATEDIFF_BIG(millisecond, '1970-01-01', "startsAt")
                      AS "StartsAtMs",
-                   (EXTRACT(EPOCH FROM "endsAt" AT TIME ZONE 'UTC') * 1000)::bigint
+                   DATEDIFF_BIG(millisecond, '1970-01-01', "endsAt")
                      AS "EndsAtMs"
             FROM "MarkupRule"
-            WHERE "active"
+            WHERE "active" = 1
             ORDER BY "id" ASC
             """).ToListAsync(ct);
 
@@ -88,7 +105,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    c."negated" AS "Negated"
             FROM "MarkupRuleCondition" c
             JOIN "MarkupRule" r ON r."id" = c."ruleId"
-            WHERE r."active"
+            WHERE r."active" = 1
             ORDER BY c."ruleId" ASC, c."dimension" ASC, c."value" ASC
             """).ToListAsync(ct);
 
@@ -121,8 +138,8 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         // rung of the purchase-side chain, and the name is what a quote says
         // when that rung decides the price.
         var activeList = (await db.Database.SqlQuery<ActiveListRow>($"""
-            SELECT "id" AS "Id", "name" AS "Name", "markupPercent" AS "MarkupPercent"
-            FROM "PriceList" WHERE "active" LIMIT 1
+            SELECT TOP 1 "id" AS "Id", "name" AS "Name", "markupPercent" AS "MarkupPercent"
+            FROM "PriceList" WHERE "active" = 1
             """).ToListAsync(ct)).FirstOrDefault();
 
         // The suppliers that state a margin, as a lookup for the same reason
@@ -140,6 +157,22 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         var supplierMarkups = supplierMarkupRows.ToDictionary(
             s => s.Id, s => (s.Name, s.MarkupPercent), StringComparer.Ordinal);
 
+        // The supplier groups, for the same reason and in the same shape as
+        // the markups above: a few hundred rows read once per request beats a
+        // join added to all six queries that price a row.
+        //
+        // Its own query rather than a column on the one above, because that
+        // one only loads suppliers that HAVE a markup — a supplier in a group
+        // and without a markup of their own would be invisible to it.
+        var supplierGroupRows = await db.Database.SqlQuery<SupplierGroupRow>($"""
+            SELECT "id" AS "Id", "groupName" AS "GroupName"
+            FROM "Supplier"
+            WHERE "groupName" IS NOT NULL
+            """).ToListAsync(ct);
+
+        var supplierGroups = supplierGroupRows.ToDictionary(
+            s => s.Id, s => s.GroupName, StringComparer.Ordinal);
+
         // The goods categories that price something, as a lookup rather than a
         // join on every priceable query.
         //
@@ -155,7 +188,7 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
                    "markupType" AS "MarkupType", "markupValue" AS "MarkupValue",
                    "markupMinAmount" AS "MarkupMinAmount"
             FROM "GoodsCategory"
-            WHERE "active" AND "markupType" IS NOT NULL AND "markupValue" IS NOT NULL
+            WHERE "active" = 1 AND "markupType" IS NOT NULL AND "markupValue" IS NOT NULL
             """).ToListAsync(ct);
 
         var goodsCategoryMarkups = categoryRows.ToDictionary(
@@ -180,10 +213,13 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
             ClientRole: account?.ClientRole,
             SalesManagerId: account?.SalesManagerId,
             City: account?.City,
+            OutletId: account?.OutletId,
+            DeliveryTerms: account?.DeliveryTerms,
             PriceListId: activeList?.Id,
             PriceListName: activeList?.Name,
             PriceListMarkupPercent: activeList?.MarkupPercent,
-            SupplierMarkups: supplierMarkups);
+            SupplierMarkups: supplierMarkups,
+            SupplierGroups: supplierGroups);
     }
 
     /// <summary>
@@ -227,6 +263,8 @@ public sealed class PricingContextLoader(AutoPartsContext db, SessionTokens toke
         string? ClientRole,
         string? SalesManagerId,
         string? City,
+        string? OutletId,
+        string? DeliveryTerms,
         string? CategoryId,
         string? CategoryName,
         double? CategoryMarkupPercent,
@@ -255,6 +293,11 @@ public record RequestPricing(
     string? ClientRole = null,
     string? SalesManagerId = null,
     string? City = null,
+    string? OutletId = null,
+    string? DeliveryTerms = null,
+    /// <summary>Supplier id to business group, for the مجموعة الموردين
+    /// dimension. Only the suppliers that have one.</summary>
+    Dictionary<string, string>? SupplierGroups = null,
     /// <summary>The purchase price list in force, or null when none is.</summary>
     string? PriceListId = null,
     /// <summary>
@@ -321,6 +364,12 @@ public record RequestPricing(
             ClientRole: ClientRole,
             SalesManagerId: SalesManagerId,
             City: City,
+            OutletId: OutletId,
+            DeliveryTerms: DeliveryTerms,
+            // The group of whichever supplier's offer won, looked up the same
+            // way their markup is — the dimension has to follow the part to
+            // whoever we would actually buy it from today.
+            SupplierGroup: SupplierGroups?.GetValueOrDefault(SupplierIdFor(row)),
             PriceListId: PriceListId), Rules);
     }
 
@@ -431,3 +480,6 @@ public interface IPriceable
     /// <summary>oem | aftermarket | substitute, for the "part type" dimension.</summary>
     string PartType { get; }
 }
+
+/// <summary>A supplier and the business group they are in.</summary>
+public record SupplierGroupRow(string Id, string GroupName);

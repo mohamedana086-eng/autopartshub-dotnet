@@ -23,6 +23,14 @@ public partial class VehicleVariant
 
     public int? TecDocId { get; set; }
 
+    public string? BodyType { get; set; }
+
+    public string? Region { get; set; }
+
+    public string? SteeringSide { get; set; }
+
+    public string? Transmission { get; set; }
+
     public virtual ICollection<Fitment> Fitments { get; set; } = new List<Fitment>();
 
     public virtual VehicleModel Model { get; set; } = null!;

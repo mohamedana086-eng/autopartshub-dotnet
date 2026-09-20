@@ -3,6 +3,9 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain.Pricing;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -106,9 +109,9 @@ public static class AdminSiteWriteEndpoints
                 // would make clearing a rating impossible.
                 await db.Database.ExecuteSqlAsync($"""
                     UPDATE "Supplier"
-                       SET "rating" = CASE WHEN {hasRating} THEN {rating}::int ELSE "rating" END,
-                           "acceptsReturns" = CASE WHEN {hasReturns}
-                                                   THEN {returns}::boolean
+                       SET "rating" = CASE WHEN {hasRating} = 1 THEN {rating} ELSE "rating" END,
+                           "acceptsReturns" = CASE WHEN {hasReturns} = 1
+                                                   THEN {returns}
                                                    ELSE "acceptsReturns" END
                      WHERE "id" = {id}
                     """, ct);
@@ -376,11 +379,10 @@ public static class AdminSiteWriteEndpoints
     private static async Task<SupplierClash?> Clash(
         AutoPartsContext db, string code, string slug, string? exceptId, CancellationToken ct) =>
         (await db.Database.SqlQuery<SupplierClash>($"""
-            SELECT "id" AS "Id", "name" AS "Name", "code" AS "Code"
+            SELECT TOP 1 "id" AS "Id", "name" AS "Name", "code" AS "Code"
             FROM "Supplier"
             WHERE ("code" = {code} OR "slug" = {slug})
-              AND ({exceptId}::text IS NULL OR "id" <> {exceptId})
-            LIMIT 1
+              AND ({exceptId} IS NULL OR "id" <> {exceptId})
             """).ToListAsync(ct)).FirstOrDefault();
 
     private static string ClashMessage(SupplierClash clash, SupplierInput s) =>
@@ -400,13 +402,13 @@ public static class AdminSiteWriteEndpoints
                    c."code" AS "PurchaseCurrencyCode",
                    s."priority" AS "Priority", s."minOrderAmount" AS "MinOrderAmount",
                    s."markupPercent" AS "MarkupPercent",
-                   s."active" AS "Active", to_char(s."approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt",
-                   p."count"::int AS "ProductCount"
+                   s."active" AS "Active", (CONVERT(varchar(23), s."approvedAt", 126) + 'Z') AS "ApprovedAt",
+                   p."count" AS "ProductCount"
             FROM "Supplier" s
             LEFT JOIN "Currency" c ON c."id" = s."purchaseCurrencyId"
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "Product" pr WHERE pr."supplierId" = s."id"
-            ) p ON TRUE
+            ) p
             WHERE s."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 
@@ -415,19 +417,19 @@ public static class AdminSiteWriteEndpoints
         (await db.Database.SqlQuery<AdminWarehouseRow>($"""
             SELECT w."id" AS "Id", w."code" AS "Code", w."name" AS "Name", w."city" AS "City",
                    w."address" AS "Address", w."active" AS "Active", w."priority" AS "Priority",
-                   o."count"::int AS "OutletCount",
-                   s."skus"::int AS "SkuCount",
-                   COALESCE(s."quantity", 0)::int AS "TotalQuantity",
-                   COALESCE(s."reserved", 0)::int AS "TotalReserved"
+                   o."count" AS "OutletCount",
+                   s."skus" AS "SkuCount",
+                   COALESCE(s."quantity", 0) AS "TotalQuantity",
+                   COALESCE(s."reserved", 0) AS "TotalReserved"
             FROM "Warehouse" w
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "RetailOutlet" ro WHERE ro."warehouseId" = w."id"
-            ) o ON TRUE
-            LEFT JOIN LATERAL (
+            ) o
+            OUTER APPLY (
               SELECT COUNT(*) AS "skus", SUM(sl."quantity") AS "quantity",
                      SUM(sl."reserved") AS "reserved"
               FROM "StockLevel" sl WHERE sl."warehouseId" = w."id"
-            ) s ON TRUE
+            ) s
             WHERE w."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

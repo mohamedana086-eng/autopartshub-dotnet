@@ -1,4 +1,5 @@
 using System.Text.Json;
+using AutoPartsHub.Application.Abstractions;
 
 namespace AutoPartsHub.Api.Mail;
 
@@ -78,8 +79,26 @@ public sealed class MailNotConfiguredException()
 /// operator reading the log finds a sentence rather than a silence that looks
 /// like a working feature.
 /// </remarks>
-public sealed class Mailer(ILogger<Mailer> log)
+public sealed class Mailer(ILogger<Mailer> log) : IEmailSender
 {
+    /// <summary>
+    /// <see cref="IEmailSender"/>: send one message, however it is sent.
+    /// </summary>
+    /// <remarks>
+    /// The interface is what the notification worker will hold (T-193), and
+    /// this is the transport it holds today. Composing a message is still
+    /// <see cref="BusinessMail"/>'s job — the interface takes three strings so
+    /// that a future transport is not made to depend on the shape of today's
+    /// templates.
+    ///
+    /// It routes through <see cref="NotifyAsync"/> and so does not throw. A
+    /// worker draining an outbox has already decided that a message which
+    /// cannot be sent is a line in a log rather than a failed unit of work; a
+    /// transport that threw here would make that decision twice.
+    /// </remarks>
+    Task IEmailSender.SendAsync(string to, string subject, string body, CancellationToken ct) =>
+        NotifyAsync(new Email(to, subject, body), ct);
+
     /// <summary>
     /// Sends a message about something that has already happened, and never
     /// fails.

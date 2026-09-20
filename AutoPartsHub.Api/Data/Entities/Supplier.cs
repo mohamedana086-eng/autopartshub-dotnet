@@ -23,6 +23,10 @@ public partial class Supplier
 
     public string? Country { get; set; }
 
+    /// <summary>A business grouping of suppliers — the مجموعة الموردين markup
+    /// dimension. Free text, like Country beside it.</summary>
+    public string? GroupName { get; set; }
+
     public int? GuaranteeMonths { get; set; }
 
     public int? DefaultStockDays { get; set; }
@@ -33,8 +37,13 @@ public partial class Supplier
 
     public DateTime? ApprovedAt { get; set; }
 
-    public virtual ICollection<Client> Clients { get; set; } = new List<Client>();
+    public double? MarkupPercent { get; set; }
 
+    public double MinOrderAmount { get; set; }
+
+    public int Priority { get; set; }
+
+    public virtual ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public virtual ICollection<Product> Products { get; set; } = new List<Product>();
 

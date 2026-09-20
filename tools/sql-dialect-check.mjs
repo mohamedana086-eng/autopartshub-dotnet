@@ -1,0 +1,169 @@
+// Extracts every raw SQL statement in the API and asks SQL Server whether it
+// would accept it.
+//
+//   node tools/sql-dialect-check.mjs            # write the batch, print a summary
+//   node tools/sql-dialect-check.mjs --list     # also list every statement found
+//
+// Then:
+//   sqlcmd -S "(localdb)\MSSQLLocalDB" -d AutoPartsHub -i tools/.sql-check.sql
+//
+// WHY THIS EXISTS
+// ---------------
+// There are around a hundred and seventy raw statements in this application,
+// written for PostgreSQL. Porting them by reading is guesswork, and the
+// differences that cost something are the ones nobody predicts.
+//
+// SQL Server can check all of them without any data in the database. Under
+// SET NOEXEC ON it still parses each batch and binds every name in it — so a
+// `::int` cast, a LATERAL join, an ON CONFLICT clause, a column that does not
+// exist and a table spelled wrong all report, and nothing runs. That turns
+// "have we ported it correctly" from a judgement into a list.
+//
+// WHAT IT CANNOT TELL YOU
+// -----------------------
+// Whether the ported statement means the same thing. NOEXEC checks shape and
+// names, not results — a LIMIT rewritten to a TOP that lost its ORDER BY
+// parses perfectly and returns different rows. That is what the seeded tests
+// are for; this is the pass that gets the count down to something a human can
+// read.
+
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+
+const API = resolve(import.meta.dirname, '..', 'AutoPartsHub.Api');
+const OUT = resolve(import.meta.dirname, '.sql-check.sql');
+const list = process.argv.includes('--list');
+
+function walk(dir) {
+  const out = [];
+  const stack = [dir];
+  while (stack.length) {
+    const here = stack.pop();
+    for (const entry of readdirSync(here)) {
+      if (entry === 'obj' || entry === 'bin') continue;
+      const path = join(here, entry);
+      if (statSync(path).isDirectory()) stack.push(path);
+      else if (entry.endsWith('.cs')) out.push(path);
+    }
+  }
+  return out;
+}
+
+const lineAt = (text, index) => 1 + (text.slice(0, index).match(/\n/g)?.length ?? 0);
+
+/**
+ * The C# holes become NULL.
+ *
+ * Every `{expr}` in an interpolated SQL string is a parameter at runtime. The
+ * obvious substitution is a declared parameter, and it was the first thing
+ * tried — but a parameter has to be declared as some type, and every type is
+ * a guess about what C# was passing. Declaring them `sql_variant` produced
+ * twenty-seven conversion errors that say nothing about the statement and
+ * everything about the placeholder.
+ *
+ * NULL has no type and converts to anything, so it disappears from the
+ * diagnosis entirely. It is untyped in exactly the way a real parameter is
+ * not, which is fine here: this pass checks shape and names, and a comparison
+ * against NULL has the same shape as a comparison against anything else.
+ *
+ * A `{expr}::text[]` keeps its cast, deliberately: that IS the PostgreSQL
+ * that has to go, and hiding it here would hide the work.
+ */
+function parameterise(sql) {
+  // Nested braces do not occur in these strings; interpolations are simple
+  // expressions. `{{` is an escaped brace and is left alone.
+  let text = sql.replace(/(?<!\{)\{([^{}]+)\}/g, 'NULL');
+
+  // Except in a row count, where NULL is not merely untyped but invalid:
+  // SQL Server rejects `FETCH NEXT NULL ROWS` outright, and a page size is
+  // always an integer anyway. Reported as six failures until this existed,
+  // none of which said anything about the statement.
+  text = text
+    .replace(/\bTOP\s*\(\s*NULL\s*\)/g, 'TOP (1)')
+    .replace(/\bTOP\s+NULL\b/g, 'TOP 1')
+    .replace(/\bOFFSET\s+NULL\b/g, 'OFFSET 0')
+    .replace(/\bFETCH\s+NEXT\s+NULL\b/g, 'FETCH NEXT 1');
+
+  // And in a CASE that decides an ORDER BY. `CASE WHEN NULL = 1 THEN "col" END`
+  // is provably constant, so SQL Server refuses it — "a constant expression was
+  // encountered in the ORDER BY list" — where the same statement with a real
+  // parameter is accepted. A declared variable is what the application
+  // actually sends, and it restores the only thing NULL was wrong about here:
+  // that the value is not known at compile time.
+  const flags = [...text.matchAll(/CASE WHEN NULL =/g)].length;
+  if (flags > 0) {
+    text = `DECLARE @flag bit;\n${text.replace(/CASE WHEN NULL =/g, 'CASE WHEN @flag =')}`;
+  }
+
+  // And in CONTAINSTABLE, whose arguments are not values: the third is a
+  // search condition in full text's own little language and the fourth is a
+  // row count, and NULL is a syntax error in both positions rather than an
+  // untyped anything. Left as NULL the statement never reaches the question
+  // worth asking of it — whether this instance has a full-text index — and
+  // answers with two parse errors instead.
+  if (/\bCONTAINSTABLE\b/.test(text)) {
+    text = `DECLARE @terms nvarchar(4000);\n${text.replace(
+      /(CONTAINSTABLE\s*\([^,]+,\s*\([^)]*\)\s*,\s*)NULL(\s*,\s*)NULL/g,
+      '$1@terms$21')}`;
+  }
+
+  return { text, names: [] };
+}
+
+const statements = [];
+
+for (const file of walk(API)) {
+  const source = readFileSync(file, 'utf8');
+  const where = relative(API, file).replaceAll('\\', '/');
+  for (const m of source.matchAll(/\$"""(.*?)"""/gs)) {
+    const raw = m[1];
+    // Skip anything that is not actually SQL — a few interpolated strings in
+    // this codebase are messages or JSON.
+    if (!/\b(SELECT|INSERT|UPDATE|DELETE|WITH)\b/i.test(raw)) continue;
+    statements.push({
+      where: `${where}:${lineAt(source, m.index)}`,
+      ...parameterise(raw),
+    });
+  }
+}
+
+const batches = statements.map(({ where, text, names }, i) => {
+  const declare = names.length
+    ? `DECLARE ${names.map((n) => `${n} sql_variant`).join(', ')};\n`
+    : '';
+  // The marker is its own batch. A batch containing a syntax error is not
+  // executed at all — including a PRINT sitting above the error — so a marker
+  // in the same batch as the statement would go missing for exactly the
+  // statements worth naming.
+  //
+  // NOEXEC is turned off around the marker so it prints, and back on so the
+  // statement is parsed and bound without running.
+  return [
+    `SET NOEXEC OFF;`,
+    `PRINT '### ${i} ${where}';`,
+    `SET NOEXEC ON;`,
+    `GO`,
+    declare + text,
+    `GO`,
+  ].join('\n');
+});
+
+writeFileSync(
+  OUT,
+  [
+    '-- Generated by tools/sql-dialect-check.mjs. Do not edit.',
+    'SET QUOTED_IDENTIFIER ON;',
+    'GO',
+    ...batches,
+    'SET NOEXEC OFF;',
+    'GO',
+    "PRINT '### done';",
+    'GO',
+    '',
+  ].join('\n')
+);
+
+console.log(`${statements.length} statements -> ${relative(process.cwd(), OUT)}`);
+if (list) {
+  for (const [i, s] of statements.entries()) console.log(`  ${i}\t${s.where}`);
+}

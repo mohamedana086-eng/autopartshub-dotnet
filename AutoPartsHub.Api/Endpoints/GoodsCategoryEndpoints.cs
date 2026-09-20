@@ -1,8 +1,10 @@
-using AutoPartsHub.Api.Admin;
 using System.Text.Json;
-using AutoPartsHub.Api.Catalogue;
+using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
+using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain.Pricing;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -144,10 +146,9 @@ public static class GoodsCategoryEndpoints
         AutoPartsContext db, string slug, string name, string? exceptId, CancellationToken ct)
     {
         var rows = await db.Database.SqlQuery<ClashRow>($"""
-            SELECT "slug" AS "Slug", "name" AS "Name" FROM "GoodsCategory"
+            SELECT TOP 1 "slug" AS "Slug", "name" AS "Name" FROM "GoodsCategory"
             WHERE ("slug" = {slug} OR lower("name") = lower({name}))
-              AND ({exceptId}::text IS NULL OR "id" <> {exceptId})
-            LIMIT 1
+              AND ({exceptId} IS NULL OR "id" <> {exceptId})
             """).ToListAsync(ct);
 
         var row = rows.FirstOrDefault();
@@ -165,17 +166,17 @@ public static class GoodsCategoryEndpoints
                    g."sortOrder" AS "SortOrder", g."active" AS "Active",
                    -- Counted in the query rather than by loading the parts.
                    -- The list wants the number, not the rows behind it.
-                   COALESCE(p."n", 0)::int AS "ProductCount",
-                   COALESCE(r."n", 0)::int AS "RuleCount"
+                   COALESCE(p."n", 0) AS "ProductCount",
+                   COALESCE(r."n", 0) AS "RuleCount"
             FROM "GoodsCategory" g
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS n FROM "Product" WHERE "goodsCategoryId" = g."id"
-            ) p ON true
-            LEFT JOIN LATERAL (
+            ) p
+            OUTER APPLY (
               SELECT COUNT(*) AS n FROM "MarkupRuleCondition"
                WHERE "dimension" = 'goodsCategory' AND "value" = g."id"
-            ) r ON true
-            WHERE ({id}::text IS NULL OR g."id" = {id})
+            ) r
+            WHERE ({id} IS NULL OR g."id" = {id})
             ORDER BY g."sortOrder" ASC, g."name" ASC
             """).ToListAsync(ct);
 

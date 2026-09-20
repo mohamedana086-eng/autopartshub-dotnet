@@ -3,6 +3,8 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -163,7 +165,7 @@ public static class AdminDeskWriteEndpoints
                        {(link.Length > 0 ? link : null)}
                 FROM "Client" c
                 WHERE c."id" = {clientId}
-                  AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+                  AND ({scope} IS NULL OR c."salesManagerId" = {scope})
                 """, ct);
 
             // Nothing written: the account does not exist, or is not one of
@@ -231,7 +233,7 @@ public static class AdminDeskWriteEndpoints
         (await db.Database.SqlQuery<AdminClientRow>($"""
             SELECT c."id" AS "Id", c."name" AS "Name", c."email" AS "Email", c."role" AS "Role",
                    c."city" AS "City",
-                   (c."passwordHash" IS NOT NULL) AS "HasLogin",
+                   CAST(CASE WHEN c."passwordHash" IS NOT NULL THEN 1 ELSE 0 END AS bit) AS "HasLogin",
                    c."categoryId" AS "CategoryId", cat."name" AS "CategoryName",
                    c."discountPercent" AS "DiscountPercent",
                    c."currencyId" AS "CurrencyId", cur."code" AS "CurrencyCode",

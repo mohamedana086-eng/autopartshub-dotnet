@@ -19,5 +19,7 @@ public partial class PriceList
 
     public DateTime UpdatedAt { get; set; }
 
+    public double? MarkupPercent { get; set; }
+
     public virtual ICollection<PriceListItem> PriceListItems { get; set; } = new List<PriceListItem>();
 }

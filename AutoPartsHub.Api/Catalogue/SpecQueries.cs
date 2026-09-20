@@ -63,9 +63,9 @@ public sealed class SpecQueries(AutoPartsContext db)
                        ORDER BY s."sortOrder" ASC, s."id" ASC
                      ) AS rn
               FROM "ProductSpec" s
-              WHERE s."productId" = ANY({array}::text[])
+              WHERE s."productId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
             ) ranked
-            WHERE ({perProduct}::int IS NULL OR rn <= {perProduct})
+            WHERE ({perProduct} IS NULL OR rn <= {perProduct})
             ORDER BY "productId" ASC, rn ASC
             """).ToListAsync(ct);
 
@@ -93,9 +93,9 @@ public sealed class SpecQueries(AutoPartsContext db)
         var array = ids.ToArray();
 
         var rows = await db.Database.SqlQuery<SpecCountRow>($"""
-            SELECT "productId" AS "ProductId", COUNT(*)::int AS "Count"
+            SELECT "productId" AS "ProductId", COUNT(*) AS "Count"
             FROM "ProductSpec"
-            WHERE "productId" = ANY({array}::text[])
+            WHERE "productId" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(array)}))
             GROUP BY "productId"
             """).ToListAsync(ct);
 

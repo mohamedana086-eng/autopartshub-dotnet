@@ -29,6 +29,19 @@ public partial class Product
 
     public int? TecDocId { get; set; }
 
+    public string? GoodsCategoryId { get; set; }
+
+    public string PackagingUnit { get; set; } = null!;
+
+    public string PartType { get; set; } = null!;
+
+    public int QuantityPerPackage { get; set; }
+
+    public int? WeightGrams { get; set; }
+
+    /// <summary>The group it is priced with, where it belongs to one.</summary>
+    public virtual GoodsCategory? GoodsCategory { get; set; }
+
     public virtual ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
 
     public virtual ICollection<Fitment> Fitments { get; set; } = new List<Fitment>();

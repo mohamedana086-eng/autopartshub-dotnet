@@ -33,8 +33,13 @@ is not read. It is gitignored. `DATABASE_URL` may be either a
 own `Host=…;Database=…` form; see `Data/ConnectionString.cs`.
 
 ```
-GET /health      the process is up
-GET /health/db   it can reach the database, and how many products it can see
+GET /health        the process is up
+GET /health/db     it can reach the database, and how many products it can see
+GET /health/ready  it should be in the rotation: the database answers AND its
+                   schema is current. 503 until both hold — which is what a
+                   deployment looks like between starting and finishing its
+                   migrations. The cache, full text and the mail transport are
+                   reported beside them and do not decide.
 ```
 
 ## The container
@@ -146,8 +151,8 @@ runs:
 | `SELECT … FOR UPDATE` | stock reservation takes real row locks at checkout |
 | `LATERAL` joins | the admin lists aggregate per row in one pass |
 | `unnest(…)` | a price-list upload is one statement per five thousand rows |
-| `regexp_replace` in a predicate | part numbers match with their separators stripped |
-| `word_similarity` | the fuzzy search, which needs pg_trgm |
+| a stored normalised part number | part numbers match with their separators stripped, and seek |
+| `CONTAINSTABLE` and prefix seeks | the near-miss search, where pg_trgm's `word_similarity` was |
 | `COUNT(*) OVER ()` | the search's exact total, on the same pass as its rows |
 | `row_number() OVER (PARTITION BY …)` | the first three specifications *of each part*, not the first three overall |
 | `ON CONFLICT … DO NOTHING` | a barcode another part already holds is skipped, not a failed import |
@@ -446,6 +451,10 @@ because the update and the stock movement are in the same transaction.
 | `tools/supplier-signup.mjs` | 39 cases, and the eight places a hidden part could leak |
 | `tools/order-post.mjs` | the refusals, then one real order, then removed |
 | `tools/stock-race.mjs` | two concurrent orders for the last unit; one wins |
+| `tools/cart-lines.mjs` | the basket a line at a time, and eight concurrent adds with none lost |
+| `tools/bulk-lookup.mjs` | both bulk shapes, the caps, and which part a brand-named line means |
+| `tools/ticket-status.mjs` | who may set a ticket status, and who may follow one |
+| `tools/supplier-products.mjs` | two suppliers, a line each, and what neither can reach |
 | `tools/auth-interop.mjs` | a cookie from either API is accepted by the other |
 
 Five of them write. All five make their own rows, count what was there before
@@ -560,15 +569,22 @@ There is no CI here. The other repository has a pipeline; this one has no
 remote to run against yet, so `dotnet test` is a thing somebody has to
 remember. That is worth fixing on the day this gets pushed somewhere.
 
-**The business messages are here; the account ones are not.** `Mail/` sends
-what the other API sends when an order is accepted, refused, shipped or called
-off, and when a ticket is answered — the same four statuses, the same silence on
-the other four, the same sentences word for word. What is still missing is
-password recovery and address confirmation: `/api/auth` here is login, register
-and logout, and neither of those flows is ported, so nothing here calls the
-throwing `SendAsync` yet.
+**The business messages are here, and so are the account ones now.** `Mail/`
+sends what the other API sends when an order is accepted, refused, shipped or
+called off, and when a ticket is answered — the same four statuses, the same
+silence on the other four, the same sentences word for word.
 
-It was ported ahead of the day it matters, deliberately. Email is a side effect
+Password recovery and address confirmation used to be the gap in that sentence,
+and they were the only place the storefront could reach a 404 by using the app
+normally. They are ported (T-196): `Endpoints/AccountRecoveryEndpoints.cs` over
+`Auth/VerificationTokens.cs`, and registration sends a confirmation link again.
+Two things there are a contract with the other API rather than a preference,
+because both read one `VerificationToken` table and only the hash of a token is
+stored — the token encoding and hash (base64url, SHA-256, lowercase hex), and
+the word "link" in every refusal about a token, which the reset page matches to
+decide whether to offer a fresh one. See CONTRACTS.md.
+
+The mailer was ported ahead of the day it matters, deliberately. Email is a side effect
 of a write, not a write: both APIs put the same rows in the same database either
 way, so the invariant this port exists to keep — *the two agree on every write* —
 was never at risk from the gap. But the day a transport is configured the gap

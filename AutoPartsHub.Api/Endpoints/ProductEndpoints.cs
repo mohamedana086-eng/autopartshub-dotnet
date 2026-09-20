@@ -29,7 +29,9 @@ public static class ProductEndpoints
                        pli."markupPercent" AS "ListRowMarkupPercent",
                        bo."purchasePrice" AS "OfferPrice", bo."supplierId" AS "OfferSupplierId",
                        st."available" AS "Available",
-                       s."slug" AS "SupplierSlug", s."name" AS "SupplierName", s."rating" AS "SupplierRating"
+                       s."slug" AS "SupplierSlug", s."name" AS "SupplierName",
+                       -- Both names travel; SupplierNaming picks one.
+                       s."code" AS "SupplierCode", s."rating" AS "SupplierRating"
                 FROM "Product" p
                 JOIN "Manufacturer" m ON m."id" = p."manufacturerId"
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
@@ -40,13 +42,13 @@ public static class ProductEndpoints
                 LEFT JOIN "Supplier" s ON s."id" = COALESCE(bo."supplierId", p."supplierId")
                 LEFT JOIN "PriceListItem" pli
                   ON pli."productId" = p."id"
-                 AND pli."priceListId" = (SELECT "id" FROM "PriceList" WHERE "active" LIMIT 1)
-                LEFT JOIN LATERAL (
-                  SELECT SUM(sl."quantity" - sl."reserved")::int AS "available"
+                 AND pli."priceListId" = (SELECT TOP 1 "id" FROM "PriceList" WHERE "active" = 1)
+                OUTER APPLY (
+                  SELECT SUM(sl."quantity" - sl."reserved") AS "available"
                   FROM "StockLevel" sl
                   JOIN "Warehouse" w ON w."id" = sl."warehouseId"
-                  WHERE sl."productId" = p."id" AND w."active" = true
-                ) st ON true
+                  WHERE sl."productId" = p."id" AND w."active" = 1
+                ) st
                 WHERE p."id" = {id}
                 -- A switched-off supplier's parts are out of the catalogue, so
                 -- this reads as "no such part" rather than showing a page
@@ -133,10 +135,16 @@ public static class ProductEndpoints
                     specs,
                     barcodes,
                     available = product.Available,
+                    // Three fields, as the API this replaces sent from here —
+                    // the search row's `reliability` and `acceptsReturns` are
+                    // not on this query and adding them would widen a response
+                    // that is compared field-for-field. Only the name is
+                    // decided elsewhere, by the one thing allowed to decide it.
                     supplier = product.SupplierSlug is null ? null : new
                     {
                         slug = product.SupplierSlug,
-                        name = product.SupplierName!,
+                        name = SupplierNaming.For(ctx.ClientRole)
+                            .OfMaybe(product.SupplierName, product.SupplierCode),
                         rating = product.SupplierRating,
                     },
                     interchanges,
@@ -173,4 +181,6 @@ public record ProductDetailRow(
     int? Available,
     string? SupplierSlug,
     string? SupplierName,
+    /// <summary>The opaque handle a customer sees instead of the name.</summary>
+    string? SupplierCode,
     int? SupplierRating) : IPriceable;

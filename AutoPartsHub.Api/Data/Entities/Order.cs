@@ -19,6 +19,20 @@ public partial class Order
 
     public double CurrencyRate { get; set; }
 
+    public string? Carrier { get; set; }
+
+    public DateTime? StatusChangedAt { get; set; }
+
+    public string? StatusChangedById { get; set; }
+
+    public string? StatusReason { get; set; }
+
+    public string? TrackingNumber { get; set; }
+
+    public bool WeightComplete { get; set; }
+
+    public int WeightGrams { get; set; }
+
     public virtual Client Client { get; set; } = null!;
 
     public virtual ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();

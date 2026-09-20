@@ -4,6 +4,9 @@ using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain.Pricing;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -45,7 +48,7 @@ public static class AdminPricingWriteEndpoints
             var id = Ids.New();
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "Currency" ("id", "code", "name", "symbol", "rate", "isBase", "active")
-                VALUES ({id}, {c.Code}, {c.Name}, {c.Symbol}, {c.Rate}, FALSE, {c.Active})
+                VALUES ({id}, {c.Code}, {c.Name}, {c.Symbol}, {c.Rate}, 0, {c.Active})
                 """, ct);
 
             return Results.Json(new { currency = await CurrencyById(db, id, ct) }, statusCode: 201);
@@ -364,11 +367,11 @@ public static class AdminPricingWriteEndpoints
         (await db.Database.SqlQuery<AdminCurrencyRow>($"""
             SELECT c."id" AS "Id", c."code" AS "Code", c."name" AS "Name", c."symbol" AS "Symbol",
                    c."rate" AS "Rate", c."isBase" AS "IsBase", c."active" AS "Active",
-                   n."count"::int AS "ClientCount"
+                   n."count" AS "ClientCount"
             FROM "Currency" c
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "Client" cl WHERE cl."currencyId" = c."id"
-            ) n ON TRUE
+            ) n
             WHERE c."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using AutoPartsHub.Api.Admin;
+using AutoPartsHub.Domain;
 
 namespace AutoPartsHub.Tests;
 

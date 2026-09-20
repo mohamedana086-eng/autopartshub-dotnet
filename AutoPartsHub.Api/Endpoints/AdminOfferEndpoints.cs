@@ -3,6 +3,7 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -99,12 +100,28 @@ public static class AdminOfferEndpoints
                    s."active" AS "SupplierActive", o."purchasePrice" AS "PurchasePrice",
                    o."stockDays" AS "StockDays", o."supplierPartNumber" AS "SupplierPartNumber",
                    o."active" AS "Active",
-                   (bo."supplierId" = o."supplierId") AS "IsBest"
+                   -- CAST, because IsBest is read into a bool. PostgreSQL's
+                   -- (a = b) was a boolean VALUE; the CASE that replaced it
+                   -- produces an int, and SqlClient hands an int to
+                   -- GetBoolean, which throws. See BooleanColumnTests.
+                   CAST(CASE WHEN bo."supplierId" = o."supplierId" THEN 1 ELSE 0 END AS bit) AS "IsBest"
             FROM "SupplierOffer" o
             JOIN "Supplier" s ON s."id" = o."supplierId"
             LEFT JOIN "BestOffer" bo ON bo."productId" = o."productId"
             WHERE o."productId" = {productId}
-            ORDER BY (bo."supplierId" = o."supplierId") DESC NULLS LAST,
+            -- The winning offer first, then the same order BestOffer itself
+            -- uses. Two PostgreSQL spellings had to change here and they are
+            -- easy to conflate:
+            --
+            -- `(a = b)` is a boolean VALUE there and can be sorted. T-SQL has
+            -- no boolean type at all, so the comparison becomes a CASE
+            -- producing a number.
+            --
+            -- `NULLS LAST` has no equivalent either, and the default differs:
+            -- PostgreSQL sorts nulls last under DESC, SQL Server sorts them
+            -- first. The CASE removes the question — a part with no best offer
+            -- yields 0, not null, so there is nothing left to place.
+            ORDER BY CASE WHEN bo."supplierId" = o."supplierId" THEN 1 ELSE 0 END DESC,
                      s."priority" DESC, o."purchasePrice" ASC, s."code" ASC
             """).ToListAsync(ct);
 
@@ -128,27 +145,45 @@ public static class AdminOfferEndpoints
 
         if (offers.Count > 0)
         {
-            var ids = offers.Select(_ => Ids.New()).ToArray();
-            var productIds = offers.Select(_ => productId).ToArray();
-            var supplierIds = offers.Select(o => o.SupplierId).ToArray();
-            var prices = offers.Select(o => o.PurchasePrice).ToArray();
-            var days = offers.Select(o => o.StockDays).ToArray();
-            var numbers = offers.Select(o => o.SupplierPartNumber).ToArray();
-            var active = offers.Select(o => o.Active).ToArray();
-            var now = offers.Select(_ => DateTime.UtcNow).ToArray();
+            // One timestamp for the whole write, not one per row. The eight
+            // parallel arrays this replaced evaluated DateTime.UtcNow once per
+            // offer, so a large save spread its rows across a few milliseconds
+            // for no reason — they are one edit and they are stamped as one.
+            var savedAt = DateTime.UtcNow;
 
+            var rows = offers.Select(o => new
+            {
+                id = Ids.New(),
+                productId,
+                supplierId = o.SupplierId,
+                purchasePrice = o.PurchasePrice,
+                stockDays = o.StockDays,
+                supplierPartNumber = o.SupplierPartNumber,
+                active = o.Active,
+                updatedAt = savedAt,
+            });
+
+            // PostgreSQL zipped eight equal-length arrays back into rows with
+            // unnest. SQL Server has no such thing, and the replacement is
+            // better than a translation would have been: each value now
+            // carries its own name, so the columns cannot be silently
+            // misaligned by somebody inserting one in the wrong place — which
+            // the positional form could not detect at all.
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "SupplierOffer" ("id", "productId", "supplierId", "purchasePrice",
                                              "stockDays", "supplierPartNumber", "active", "updatedAt")
-                SELECT * FROM unnest(
-                  {ids}::text[],
-                  {productIds}::text[],
-                  {supplierIds}::text[],
-                  {prices}::double precision[],
-                  {days}::int[],
-                  {numbers}::text[],
-                  {active}::boolean[],
-                  {now}::timestamp[]
+                SELECT "id", "productId", "supplierId", "purchasePrice",
+                       "stockDays", "supplierPartNumber", "active", "updatedAt"
+                FROM OPENJSON({SqlList.Rows(rows)})
+                WITH (
+                  "id" nvarchar(400) '$.id',
+                  "productId" nvarchar(400) '$.productId',
+                  "supplierId" nvarchar(400) '$.supplierId',
+                  "purchasePrice" float '$.purchasePrice',
+                  "stockDays" int '$.stockDays',
+                  "supplierPartNumber" nvarchar(400) '$.supplierPartNumber',
+                  "active" bit '$.active',
+                  "updatedAt" datetime2(3) '$.updatedAt'
                 )
                 """, ct);
         }

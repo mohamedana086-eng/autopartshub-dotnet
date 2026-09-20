@@ -23,6 +23,14 @@ public partial class Client
 
     public double DiscountPercent { get; set; }
 
+    /// <summary>Which retail outlet this account buys through — the منفذ البيع
+    /// markup dimension. Null for the many who buy through none.</summary>
+    public string? OutletId { get; set; }
+
+    /// <summary>How goods reach this account — the شروط التسليم markup
+    /// dimension. Free text; the vocabulary is the business's own.</summary>
+    public string? DeliveryTerms { get; set; }
+
     public string? CurrencyId { get; set; }
 
     public string? SalesManagerId { get; set; }

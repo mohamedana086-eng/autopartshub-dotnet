@@ -1,6 +1,7 @@
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -68,28 +69,28 @@ public static class SupplierPortalEndpoints
 
             var summary = (await db.Database.SqlQuery<SupplierSummaryRow>($"""
                 SELECT
-                  (SELECT COUNT(*) FROM "Product" p WHERE p."supplierId" = {supplierId})::int
+                  (SELECT COUNT(*) FROM "Product" p WHERE p."supplierId" = {supplierId})
                     AS "Parts",
                   (SELECT COUNT(*) FROM "Product" p
                     WHERE p."supplierId" = {supplierId}
                       AND COALESCE((SELECT SUM(s."quantity") - SUM(s."reserved")
                                       FROM "StockLevel" s WHERE s."productId" = p."id"), 0) <= 0
                       AND EXISTS (SELECT 1 FROM "StockLevel" s WHERE s."productId" = p."id")
-                  )::int AS "OutOfStock",
+                  ) AS "OutOfStock",
                   (SELECT COUNT(*) FROM "Product" p
                     WHERE p."supplierId" = {supplierId}
                       AND NOT EXISTS (SELECT 1 FROM "StockLevel" s WHERE s."productId" = p."id")
-                  )::int AS "Uncounted",
+                  ) AS "Uncounted",
                   (SELECT COUNT(*) FROM "OrderItem" i
                      JOIN "Product" p ON p."id" = i."productId"
                      JOIN "Order" o ON o."id" = i."orderId"
-                    WHERE p."supplierId" = {supplierId} AND o."status" = ANY({Open}::text[])
-                  )::int AS "OpenLines",
+                    WHERE p."supplierId" = {supplierId} AND o."status" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(Open)}))
+                  ) AS "OpenLines",
                   (SELECT COALESCE(SUM(i."quantity"), 0) FROM "OrderItem" i
                      JOIN "Product" p ON p."id" = i."productId"
                      JOIN "Order" o ON o."id" = i."orderId"
-                    WHERE p."supplierId" = {supplierId} AND o."status" = ANY({Open}::text[])
-                  )::int AS "OpenUnits"
+                    WHERE p."supplierId" = {supplierId} AND o."status" IN (SELECT value COLLATE DATABASE_DEFAULT FROM OPENJSON({SqlList.Of(Open)}))
+                  ) AS "OpenUnits"
                 """).ToListAsync(ct)).Single();
 
             return Results.Ok(new
@@ -125,11 +126,11 @@ public static class SupplierPortalEndpoints
                 JOIN "Order" o ON o."id" = i."orderId"
                 WHERE p."supplierId" = {supplierId}
                 ORDER BY o."createdAt" DESC, p."partNumber" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
-                SELECT COUNT(*)::int AS "Value"
+                SELECT COUNT(*) AS "Value"
                 FROM "OrderItem" i
                 JOIN "Product" p ON p."id" = i."productId"
                 WHERE p."supplierId" = {supplierId}
@@ -173,9 +174,9 @@ public static class SupplierPortalEndpoints
             // "we have sold out of it". Those call for different conversations.
             var parts = await db.Database.SqlQuery<SupplierStockRow>($"""
                 SELECT p."partNumber" AS "PartNumber", p."name" AS "Name",
-                       SUM(s."quantity")::int AS "Quantity",
-                       COALESCE(SUM(s."reserved"), 0)::int AS "Reserved",
-                       COALESCE(SUM(s."quantity") - SUM(s."reserved"), 0)::int AS "Available"
+                       SUM(s."quantity") AS "Quantity",
+                       COALESCE(SUM(s."reserved"), 0) AS "Reserved",
+                       COALESCE(SUM(s."quantity") - SUM(s."reserved"), 0) AS "Available"
                 FROM "Product" p
                 LEFT JOIN "StockLevel" s ON s."productId" = p."id"
                 WHERE p."supplierId" = {supplierId}

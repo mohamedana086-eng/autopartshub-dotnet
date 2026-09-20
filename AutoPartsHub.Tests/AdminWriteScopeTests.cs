@@ -42,6 +42,17 @@ public partial class AdminWriteScopeTests
         "/api/admin/notifications",
         // Moving their own customers' orders along.
         "/api/admin/orders/{id}",
+        // The same permission in the shape the backlog specifies: the status
+        // in the path instead of the body. Nothing new is open here — a
+        // salesperson who can PATCH an order to `accepted` is the one pressing
+        // approve — and they are listed rather than folded into the line above
+        // because this list is read as "which writes", not "which handlers".
+        "/api/admin/orders/{id}/approve",
+        "/api/admin/orders/{id}/reject",
+        "/api/admin/orders/{id}/cancel",
+        // Correcting a tracking number after the fact. It moves nothing and
+        // touches two columns, on an order that is already theirs to move.
+        "/api/admin/orders/{id}/shipping",
         // Answering their own customers' tickets, and resolving them. A
         // support queue an admin has to type into on somebody else's behalf is
         // a queue that does not get answered.

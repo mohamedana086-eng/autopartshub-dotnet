@@ -1,6 +1,9 @@
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Api.Mail;
+using AutoPartsHub.Application.Abstractions;
+using AutoPartsHub.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -55,6 +58,7 @@ public static class AuthEndpoints
         // POST /api/auth/register { name, email, password, role, city }
         app.MapPost("/api/auth/register", async (
             RegisterRequest body, AutoPartsContext db, SessionTokens tokens,
+            VerificationTokens verification, IEmailSender mail,
             HttpContext http, IHostEnvironment env, CancellationToken ct) =>
         {
             var name = (body.Name ?? "").Trim();
@@ -102,6 +106,23 @@ public static class AuthEndpoints
                 INSERT INTO "Client" ("id", "name", "email", "city", "role", "passwordHash", "categoryId")
                 VALUES ({id}, {name}, {email}, {city}, {role}, {hash}, {retailTier})
                 """, ct);
+
+            // A confirmation link, sent on the way out. Failing to send it must
+            // not fail the registration: the account is real, the person is
+            // about to be signed in, and /api/auth/email/resend exists
+            // precisely so this can be recovered from. IEmailSender does not
+            // throw — an unconfigured transport is a named line in the log.
+            var issued = await verification.IssueAsync(
+                id, VerificationTokens.Purposes.EmailConfirmation, ct);
+
+            if (issued is not null)
+            {
+                var confirmation = RecoveryMail.EmailConfirmation(
+                    BusinessMail.Context(), email, name, issued.Token);
+
+                await mail.SendAsync(
+                    confirmation.To, confirmation.Subject, confirmation.Body, ct);
+            }
 
             Issue(http, tokens, env, new SessionPayload(
                 id, Roles.Narrow(role), retailTier, name,

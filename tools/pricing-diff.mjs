@@ -79,6 +79,12 @@ const ROLES = ['RETAIL', 'B2B', 'SALES'];
 const MANAGERS = ['mgr-1', 'mgr-2'];
 const CITIES = ['Cairo', 'ALEXANDRIA', 'tanta'];
 const LISTS = ['pl-a', 'pl-b'];
+// Free text and mixed case on purpose: supplierGroup matches insensitively,
+// so a group written one way in a rule has to meet one written another way.
+const GROUPS = ['Local', 'local', 'Premium importers'];
+const OUTLETS = ['out-cairo', 'out-alex'];
+// Mixed case on purpose: deliveryTerms matches insensitively.
+const TERMS = ['EXW', 'exw', 'collect from branch'];
 
 /**
  * Every dimension a rule can narrow on, and values to draw from.
@@ -87,6 +93,13 @@ const LISTS = ['pl-a', 'pl-b'];
  * carrying one has to stop applying on BOTH ports rather than applying on one
  * of them — a rule written by a newer version of the software must not price
  * differently depending on which API answered.
+ *
+ * It used to be 'deliveryTerms', which was then one of the dimensions the
+ * client had asked for and nobody had built — so the day somebody built it,
+ * this case would quietly have become a KNOWN dimension and stopped testing
+ * the thing it exists for. It was changed for that reason, and deliveryTerms
+ * was built two commits later, which is the argument made out loud. The
+ * sentinel is now a name nothing will ever take.
  */
 const DIMENSIONS = [
   ['supplier', SUPPLIERS],
@@ -103,7 +116,10 @@ const DIMENSIONS = [
   ['city', CITIES],
   ['currency', ['EUR', 'USD', 'EGP', 'GBP']],
   ['priceList', LISTS],
-  ['deliveryTerms', ['ex-works', 'delivered']],
+  ['supplierGroup', GROUPS],
+  ['outlet', OUTLETS],
+  ['deliveryTerms', TERMS],
+  ['zzNotADimension', ['nothing', 'will', 'match']],
 ];
 const CURRENCIES = [
   null,
@@ -154,6 +170,9 @@ const makeCtx = () => ({
   clientRole: maybe(pick(ROLES)) ?? undefined,
   salesManagerId: maybe(pick(MANAGERS)) ?? undefined,
   city: maybe(pick(CITIES)) ?? undefined,
+  supplierGroup: maybe(pick(GROUPS)) ?? undefined,
+  outletId: maybe(pick(OUTLETS)) ?? undefined,
+  deliveryTerms: maybe(pick(TERMS)) ?? undefined,
   priceListId: maybe(pick(LISTS)) ?? undefined,
 });
 
@@ -232,10 +251,17 @@ const NET_TYPE = {
   PERCENT: 'Percent', AMOUNT: 'Amount', FIXED: 'Fixed', PERCENT_MIN: 'PercentMin',
 };
 
+// Field by field, deliberately — the two shapes differ (nowMs vs now, the
+// markup type names) and a spread would paper over that. The cost is that a
+// field added to makeCtx and forgotten HERE reaches only the TypeScript
+// engine, and the run then reports the two ports disagreeing when they agree
+// perfectly. That is what happened when supplierGroup and outlet were added:
+// five mismatches, all of them this.
 const forNet = (ctx, rules) => ({
   context: {
     basePrice: ctx.basePrice,
     supplierId: ctx.supplierId,
+    supplierGroup: ctx.supplierGroup ?? null,
     manufacturerName: ctx.manufacturerName,
     vehicleSystemSlug: ctx.vehicleSystemSlug,
     partNumber: ctx.partNumber,
@@ -250,6 +276,8 @@ const forNet = (ctx, rules) => ({
     clientRole: ctx.clientRole ?? null,
     salesManagerId: ctx.salesManagerId ?? null,
     city: ctx.city ?? null,
+    outletId: ctx.outletId ?? null,
+    deliveryTerms: ctx.deliveryTerms ?? null,
     priceListId: ctx.priceListId ?? null,
     nowMs: ctx.now,
     goodsCategoryMarkup: ctx.goodsCategoryMarkup

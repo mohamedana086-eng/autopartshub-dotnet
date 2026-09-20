@@ -1,4 +1,5 @@
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Orders;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Inventory;
@@ -65,12 +66,22 @@ public static class StockMovements
                     SELECT s."id" AS "Id",
                            s."warehouseId" AS "WarehouseId",
                            s."quantity" - s."reserved" AS "Available"
-                    FROM "StockLevel" s
+                    -- PostgreSQL locks with `FOR UPDATE OF s` at the end of the
+                    -- statement; SQL Server locks with a hint on the table
+                    -- itself. The hint being attached to StockLevel and not to
+                    -- Warehouse is the same statement the OF clause made: only
+                    -- the stock rows are claimed, the warehouses are read.
+                    --
+                    -- UPDLOCK takes the update lock now rather than at write
+                    -- time, which is what stops two checkouts reading the same
+                    -- availability and both deciding there is enough. ROWLOCK
+                    -- keeps that to the rows actually read, so two orders for
+                    -- different parts do not queue behind each other.
+                    FROM "StockLevel" s WITH (UPDLOCK, ROWLOCK)
                     JOIN "Warehouse" w ON w."id" = s."warehouseId"
                     WHERE s."productId" = {need.ProductId}
-                      AND w."active" = true
+                      AND w."active" = 1
                     ORDER BY w."priority" DESC, w."code" ASC
-                    FOR UPDATE OF s
                     """)
                 .ToListAsync(ct);
 
@@ -126,21 +137,25 @@ public static class StockMovements
     /// both deltas at zero and does nothing.
     /// </remarks>
     public static async Task ApplyShelfChangeAsync(
-        AutoPartsContext db, string orderId, Orders.ShelfChange change,
+        AutoPartsContext db, string orderId, ShelfChange change,
         CancellationToken ct = default)
     {
         if (change.Quantity == 0 && change.Reserved == 0) return;
 
         await db.Database.ExecuteSqlAsync($"""
-            UPDATE "StockLevel" s
+            -- PostgreSQL names the table being updated and lists the joined
+            -- ones in FROM. T-SQL names the ALIAS and puts the target into the
+            -- FROM with the rest, which also means the conditions linking it to
+            -- them become join conditions rather than sitting in the WHERE.
+            UPDATE s
             SET "quantity" = s."quantity" + (a."quantity" * {change.Quantity}),
                 "reserved" = s."reserved" + (a."quantity" * {change.Reserved}),
-                "updatedAt" = now()
-            FROM "OrderItemAllocation" a
+                "updatedAt" = SYSUTCDATETIME()
+            FROM "StockLevel" s
+            JOIN "OrderItemAllocation" a ON a."warehouseId" = s."warehouseId"
             JOIN "OrderItem" i ON i."id" = a."orderItemId"
+                              AND i."productId" = s."productId"
             WHERE i."orderId" = {orderId}
-              AND s."productId" = i."productId"
-              AND s."warehouseId" = a."warehouseId"
             """, ct);
     }
 

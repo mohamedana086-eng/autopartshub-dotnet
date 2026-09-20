@@ -3,6 +3,8 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -29,11 +31,25 @@ public static class SupplierSignupEndpoints
 
     public static void MapSupplierSignupEndpoints(this IEndpointRouteBuilder app)
     {
-        // POST /api/suppliers/register
+        // POST /api/auth/register-supplier
         // { company, code, email, password, contactName, country, description }
-        app.MapPost("/api/suppliers/register", async (
+        //
+        // Sign-up belongs under /api/auth with the other two — a supplier
+        // registering is registering, and the noun in the old path made it
+        // look like a write to the supplier list, which is a different thing
+        // an admin does.
+        //
+        // It is also still served at /api/suppliers/register, where the
+        // storefront posts today. The API and the Angular app are separate
+        // deployments, so a route moves in three steps — serve both, move the
+        // caller, drop the old one — and this is the first. CONTRACTS.md lists
+        // it among the differences to settle.
+        app.MapPost("/api/auth/register-supplier", RegisterSupplier);
+        app.MapPost("/api/suppliers/register", RegisterSupplier);
+
+        static async Task<IResult> RegisterSupplier(
             JsonElement body, AutoPartsContext db, SessionTokens tokens,
-            HttpContext http, IHostEnvironment env, CancellationToken ct) =>
+            HttpContext http, IHostEnvironment env, CancellationToken ct)
         {
             string Text(string key) => JsonValues.AsString(JsonValues.Get(body, key)).Trim();
 
@@ -116,7 +132,7 @@ public static class SupplierSignupEndpoints
                     INSERT INTO "Supplier" ("id", "name", "code", "slug", "description", "country",
                                             "active", "approvedAt")
                     VALUES ({supplierId}, {company}, {code}, {slug}, {description}, {country},
-                            FALSE, NULL)
+                            0, NULL)
                     """, ct);
 
                 // No categoryId: a pricing tier is what a *customer* is quoted
@@ -168,7 +184,7 @@ public static class SupplierSignupEndpoints
                             + "as soon as an administrator approves you.",
                 },
                 statusCode: 201);
-        });
+        }
 
         // GET /api/admin/suppliers/waiting — who has applied and not been let in.
         //
@@ -189,22 +205,32 @@ public static class SupplierSignupEndpoints
             var suppliers = await db.Database.SqlQuery<WaitingSupplierRow>($"""
                 SELECT s."id" AS "Id", s."code" AS "Code", s."slug" AS "Slug", s."name" AS "Name",
                        s."description" AS "Description", s."country" AS "Country",
-                       n."count"::int AS "ProductCount",
+                       n."count" AS "ProductCount",
                        c."name" AS "ContactName", c."email" AS "ContactEmail",
-                       to_char(c."createdAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "SignedUpAt"
+                       (CONVERT(varchar(23), c."createdAt", 126) + 'Z') AS "SignedUpAt"
                 FROM "Supplier" s
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT COUNT(*) AS "count" FROM "Product" p WHERE p."supplierId" = s."id"
-                ) n ON TRUE
-                LEFT JOIN LATERAL (
+                ) n
+                OUTER APPLY (
                   SELECT cl."name", cl."email", cl."createdAt"
                   FROM "Client" cl
                   WHERE cl."supplierId" = s."id"
                   ORDER BY cl."createdAt" ASC
-                  LIMIT 1
-                ) c ON TRUE
-                WHERE s."active" = FALSE AND s."approvedAt" IS NULL
-                ORDER BY c."createdAt" ASC NULLS LAST, s."name" ASC
+                  OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+                ) c
+                WHERE s."active" = 0 AND s."approvedAt" IS NULL
+                -- Longest-waiting applicant first, and the ones with no
+                -- contact account at all at the end.
+                --
+                -- PostgreSQL says that as NULLS LAST. SQL Server has no such
+                -- clause and its default is the opposite of what is wanted —
+                -- nulls sort FIRST under ASC — so a supplier with no account
+                -- would otherwise head the approval queue, which is exactly
+                -- the row an admin can do least with. The CASE puts them last
+                -- explicitly.
+                ORDER BY CASE WHEN c."createdAt" IS NULL THEN 1 ELSE 0 END,
+                         c."createdAt" ASC, s."name" ASC
                 """).ToListAsync(ct);
 
             return Results.Ok(new { suppliers });
@@ -261,15 +287,15 @@ public static class SupplierSignupEndpoints
                 // did not happen twice.
                 await db.Database.ExecuteSqlAsync($"""
                     UPDATE "Supplier"
-                       SET "active" = TRUE,
-                           "approvedAt" = COALESCE("approvedAt", CURRENT_TIMESTAMP)
+                       SET "active" = 1,
+                           "approvedAt" = COALESCE("approvedAt", SYSUTCDATETIME())
                      WHERE "id" = {id}
                     """, ct);
             }
             else
             {
                 await db.Database.ExecuteSqlAsync(
-                    $"""UPDATE "Supplier" SET "active" = FALSE WHERE "id" = {id}""", ct);
+                    $"""UPDATE "Supplier" SET "active" = 0 WHERE "id" = {id}""", ct);
             }
 
             // The people who have been waiting are the ones who most need to
@@ -310,7 +336,7 @@ public static class SupplierSignupEndpoints
         AutoPartsContext db, string id, CancellationToken ct) =>
         (await db.Database.SqlQuery<ApprovalStateRow>($"""
             SELECT "id" AS "Id", "name" AS "Name", "active" AS "Active",
-                   to_char("approvedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "ApprovedAt"
+                   (CONVERT(varchar(23), "approvedAt", 126) + 'Z') AS "ApprovedAt"
             FROM "Supplier" WHERE "id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 }

@@ -4,8 +4,9 @@ using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Mail;
 using AutoPartsHub.Api.Support;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace AutoPartsHub.Api.Endpoints;
 
@@ -30,8 +31,6 @@ namespace AutoPartsHub.Api.Endpoints;
 /// </remarks>
 public static class TicketEndpoints
 {
-    private const string UniqueViolation = "23505";
-
     public static void MapTicketEndpoints(this IEndpointRouteBuilder app)
     {
         /* ------------------------------------------- the customer's own --- */
@@ -49,8 +48,8 @@ public static class TicketEndpoints
                        c."name" AS "ClientName", t."orderId" AS "OrderId",
                        o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                        t."lastMessageAt" AS "LastMessageAt",
-                       (SELECT COUNT(*)::int FROM "TicketMessage" m
-                         WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
+                       (SELECT COUNT(*) FROM "TicketMessage" m
+                         WHERE m."ticketId" = t."id" AND m."internal" = 0) AS "MessageCount"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
                 LEFT JOIN "Order" o ON o."id" = t."orderId"
@@ -197,23 +196,23 @@ public static class TicketEndpoints
                        c."name" AS "ClientName", t."orderId" AS "OrderId",
                        o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                        t."lastMessageAt" AS "LastMessageAt",
-                       (SELECT COUNT(*)::int FROM "TicketMessage" m
-                         WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
+                       (SELECT COUNT(*) FROM "TicketMessage" m
+                         WHERE m."ticketId" = t."id" AND m."internal" = 0) AS "MessageCount"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
                 LEFT JOIN "Order" o ON o."id" = t."orderId"
-                WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
-                  AND ({status}::text IS NULL OR t."status" = {status})
+                WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
+                  AND ({status} IS NULL OR t."status" = {status})
                 ORDER BY t."lastMessageAt" ASC
-                LIMIT {pageSize} OFFSET {(page - 1) * pageSize}
+                OFFSET {(page - 1) * pageSize} ROWS FETCH NEXT {pageSize} ROWS ONLY
                 """).ToListAsync(ct);
 
             var total = (await db.Database.SqlQuery<int>($"""
-                SELECT COUNT(*)::int AS "Value"
+                SELECT COUNT(*) AS "Value"
                 FROM "Ticket" t
                 JOIN "Client" c ON c."id" = t."clientId"
-                WHERE ({scope}::text IS NULL OR c."salesManagerId" = {scope})
-                  AND ({status}::text IS NULL OR t."status" = {status})
+                WHERE ({scope} IS NULL OR c."salesManagerId" = {scope})
+                  AND ({status} IS NULL OR t."status" = {status})
                 """).ToListAsync(ct)).FirstOrDefault();
 
             return Results.Ok(new
@@ -374,14 +373,14 @@ public static class TicketEndpoints
                    c."name" AS "ClientName", t."orderId" AS "OrderId",
                    o."reference" AS "OrderReference", t."createdAt" AS "CreatedAt",
                    t."lastMessageAt" AS "LastMessageAt",
-                   (SELECT COUNT(*)::int FROM "TicketMessage" m
-                     WHERE m."ticketId" = t."id" AND NOT m."internal") AS "MessageCount"
+                   (SELECT COUNT(*) FROM "TicketMessage" m
+                     WHERE m."ticketId" = t."id" AND m."internal" = 0) AS "MessageCount"
             FROM "Ticket" t
             JOIN "Client" c ON c."id" = t."clientId"
             LEFT JOIN "Order" o ON o."id" = t."orderId"
             WHERE t."id" = {id}
-              AND ({clientId}::text IS NULL OR t."clientId" = {clientId})
-              AND ({scope}::text IS NULL OR c."salesManagerId" = {scope})
+              AND ({clientId} IS NULL OR t."clientId" = {clientId})
+              AND ({scope} IS NULL OR c."salesManagerId" = {scope})
             """).ToListAsync(ct);
 
     /// <summary>
@@ -399,7 +398,7 @@ public static class TicketEndpoints
             SELECT "id" AS "Id", "authorName" AS "AuthorName", "fromStaff" AS "FromStaff",
                    "internal" AS "Internal", "body" AS "Body", "createdAt" AS "CreatedAt"
             FROM "TicketMessage"
-            WHERE "ticketId" = {ticketId} AND NOT "internal"
+            WHERE "ticketId" = {ticketId} AND "internal" = 0
             ORDER BY "createdAt" ASC
             """).ToListAsync(ct);
 
@@ -444,13 +443,13 @@ public static class TicketEndpoints
                 await db.Database.ExecuteSqlAsync($"""
                     INSERT INTO "TicketMessage" ("id", "ticketId", "authorId", "authorName",
                                                  "fromStaff", "internal", "body")
-                    VALUES ({Ids.New()}, {id}, {clientId}, {authorName}, FALSE, FALSE, {input.Body})
+                    VALUES ({Ids.New()}, {id}, {clientId}, {authorName}, 0, 0, {input.Body})
                     """, ct);
 
                 await transaction.CommitAsync(ct);
                 return id;
             }
-            catch (PostgresException e) when (e.SqlState == UniqueViolation && attempt < 4)
+            catch (Exception e) when (e.Is(DatabaseRefusal.Unique) && attempt < 4)
             {
                 // A reference collision. Try again with a new one.
             }
@@ -488,7 +487,7 @@ public static class TicketEndpoints
             """, ct);
 
         await db.Database.ExecuteSqlAsync($"""
-            UPDATE "Ticket" SET "status" = {status}, "lastMessageAt" = CURRENT_TIMESTAMP
+            UPDATE "Ticket" SET "status" = {status}, "lastMessageAt" = SYSUTCDATETIME()
             WHERE "id" = {ticketId}
             """, ct);
 

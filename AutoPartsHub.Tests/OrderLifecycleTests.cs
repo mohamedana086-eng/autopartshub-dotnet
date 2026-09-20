@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AutoPartsHub.Api.Admin;
-using AutoPartsHub.Api.Orders;
+using AutoPartsHub.Domain.Orders;
+using AutoPartsHub.Domain;
 using Microsoft.AspNetCore.Http;
 
 namespace AutoPartsHub.Tests;
@@ -292,9 +293,11 @@ public class OrderLifecycleTests
 
     /* --------------------------------------------------- the filters --- */
 
+    // A plain lookup. It used to build a QueryCollection, because Read took
+    // one; now that the rules live in a layer with no web framework in it,
+    // neither does the test.
     private static Validated<OrderFilter> Filters(Dictionary<string, string> q) =>
-        OrderFilters.Read(new QueryCollection(
-            q.ToDictionary(kv => kv.Key, kv => new Microsoft.Extensions.Primitives.StringValues(kv.Value))));
+        OrderFilters.Read(key => q.GetValueOrDefault(key));
 
     private static OrderFilter OkFilters(Dictionary<string, string> q)
     {

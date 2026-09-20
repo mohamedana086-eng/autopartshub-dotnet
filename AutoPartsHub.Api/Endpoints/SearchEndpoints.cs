@@ -1,6 +1,7 @@
-using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Catalogue;
+using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
 
 namespace AutoPartsHub.Api.Endpoints;
 
@@ -99,7 +100,20 @@ public static class SearchEndpoints
             // because a filter nobody has touched should not be quietly
             // removing anything. Ordered by PartTypes so the same selection
             // always echoes back the same way.
-            var requestedTypes = query["partType"].ToString().Split(',')
+            // `offerType` is the name the new frontend is specified against and
+            // `partType` is the one this API has always taken. Both are
+            // accepted, and both are echoed below, so the two callers can move
+            // independently — the same way both supplier sign-up paths are
+            // served.
+            //
+            // Whichever is present wins; offerType wins when both are, because
+            // a caller sending the new name meant it. They are not merged: two
+            // spellings of one filter disagreeing is a question with no good
+            // answer, and taking the newer one is at least a rule somebody can
+            // predict.
+            var offered = query["offerType"].ToString();
+            var requestedTypes = (offered.Length > 0 ? offered : query["partType"].ToString())
+                .Split(',')
                 .Select(v => v.Trim()).Where(v => v.Length > 0).ToHashSet();
             var partType = PartTypes.Where(requestedTypes.Contains).ToArray();
 
@@ -157,8 +171,18 @@ public static class SearchEndpoints
             var matchedTotal = found.Total;
             var systemName = system is null ? null : await queries.SystemNameBySlugAsync(system, ct);
             var variantName = variant is null ? null : await queries.VariantLabelAsync(variant, ct);
-            var supplierName = supplier is null ? null : await queries.SupplierNameBySlugAsync(supplier, ct);
+            var supplierNames = supplier is null ? null : await queries.SupplierNamesBySlugAsync(supplier, ct);
             var ctx = await pricing.LoadAsync(http, ct);
+            // Who may see a supplier's real name. Taken from the account the
+            // pricing was loaded for rather than from the cookie, so a role
+            // changed since the last sign-in takes effect on this request.
+            var naming = SupplierNaming.For(ctx.ClientRole);
+            // The label the supplier filter shows. Anonymised like every other
+            // supplier reference: a customer who filters by a code must not be
+            // told back whose code it was.
+            var supplierName = supplierNames is null
+                ? null
+                : naming.Of(supplierNames.Name, supplierNames.Code);
 
             // Nothing matched as typed — try again allowing for a misspelling,
             // and say so in the response so the UI does not present guesses as
@@ -325,9 +349,9 @@ public static class SearchEndpoints
                         // Null where nobody has counted this part in — not the
                         // same as none left.
                         p.Available,
-                        p.SupplierSlug is null ? null : new SearchSupplierDto(
-                            p.SupplierSlug, p.SupplierName!, p.SupplierRating,
-                            p.SupplierReliability!, p.SupplierAcceptsReturns),
+                        naming.Search(
+                            p.SupplierSlug, p.SupplierName, p.SupplierCode, p.SupplierRating,
+                            p.SupplierReliability, p.SupplierAcceptsReturns),
                         matchedOn, matchedVia, matchedViaManufacturer));
                 })
                 .ToList();
@@ -446,6 +470,8 @@ public static class SearchEndpoints
                 returns = returnsOnly,
                 matchIn,
                 partType,
+                /* The same value under the name the new frontend reads. */
+                offerType = partType,
                 minPrice,
                 maxPrice,
                 sort,
@@ -513,6 +539,11 @@ public static class SearchEndpoints
                        this is a property of the parts rather than of the
                        search. */
                     partTypes = PartTypes.Select(
+                        name => new { name, count = partTypeCounts.GetValueOrDefault(name) }),
+                    /* The same counts under the name the new frontend reads.
+                       Built separately rather than shared, so a change to one
+                       name cannot silently change the other. */
+                    offerTypes = PartTypes.Select(
                         name => new { name, count = partTypeCounts.GetValueOrDefault(name) }),
                 },
                 // A page past the end is an empty list rather than a clamp to

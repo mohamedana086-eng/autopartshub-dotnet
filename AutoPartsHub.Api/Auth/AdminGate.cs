@@ -78,10 +78,13 @@ public sealed class AdminGate(SessionTokens tokens)
     private static IResult NotAdmin => Results.Json(new { error = "Admin access required." }, statusCode: 403);
 }
 
-public record GateResult(bool Ok, SessionPayload? Session, bool IsAdmin, IResult? Response)
+public record GateResult(bool Ok, SessionPayload? Session, bool IsAdmin, IResult? Response, Scope Scope)
 {
-    public static GateResult Allowed(SessionPayload session, bool isAdmin) => new(true, session, isAdmin, null);
-    public static GateResult Refused(IResult response) => new(false, null, false, response);
+    public static GateResult Allowed(SessionPayload session, bool isAdmin) =>
+        new(true, session, isAdmin, null, Scope.From(session));
+
+    public static GateResult Refused(IResult response) =>
+        new(false, null, false, response, Scope.Anonymous);
 
     /// <summary>
     /// The manager id to narrow a query to, or null for the whole table.
@@ -90,6 +93,12 @@ public record GateResult(bool Ok, SessionPayload? Session, bool IsAdmin, IResult
     /// Reading it as one value rather than as a flag plus an id is what keeps
     /// the queries honest: a scoped query takes this and a null means admin,
     /// so there is no branch where a narrowing can be left out.
+    ///
+    /// A view onto <see cref="Auth.Scope.ManagedBy"/> rather than a second
+    /// calculation of the same thing. It stays because seventy statements bind
+    /// it by this name, and because "the value that goes in the WHERE" is what
+    /// a query wants to be handed; what changed is that there is now one place
+    /// deciding it, which is where the manager reach degrees will arrive.
     /// </remarks>
-    public string? ScopeTo => IsAdmin ? null : Session!.UserId;
+    public string? ScopeTo => Scope.ManagedBy;
 }

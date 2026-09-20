@@ -61,7 +61,7 @@ public static class NotificationEndpoints
             // Only the ones still unread, so a second call cannot rewrite when
             // the earlier ones were seen.
             var marked = await db.Database.ExecuteSqlAsync($"""
-                UPDATE "Notification" SET "readAt" = now()
+                UPDATE "Notification" SET "readAt" = SYSUTCDATETIME()
                 WHERE "clientId" = {session.UserId} AND "readAt" IS NULL
                 """, ct);
 
@@ -81,7 +81,7 @@ public static class NotificationEndpoints
             if (session is null) return Results.Json(new { error = "Not signed in." }, statusCode: 401);
 
             var changed = await db.Database.ExecuteSqlAsync($"""
-                UPDATE "Notification" SET "readAt" = now()
+                UPDATE "Notification" SET "readAt" = SYSUTCDATETIME()
                 WHERE "id" = {id} AND "clientId" = {session.UserId} AND "readAt" IS NULL
                 """, ct) > 0;
 

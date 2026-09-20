@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Catalogue;
@@ -87,12 +88,22 @@ public static partial class SearchMisses
             var term = ReadTerm(q);
             if (term is null) return;
 
+            // MERGE with HOLDLOCK, which is SQL Server's ON CONFLICT. The lock
+            // is what makes it one decision: without it two searches for the
+            // same missing term can both find no row, both insert, and the
+            // loser gets a unique-key violation instead of a counter going up.
+            // A popular missing term is exactly the case where that happens.
             await db.Database.ExecuteSqlAsync($"""
-                INSERT INTO "SearchMiss" ("id", "term", "narrowed")
-                VALUES ({Ids.New()}, {term}, {narrowed})
-                ON CONFLICT ("term", "narrowed") DO UPDATE
-                  SET "searches" = "SearchMiss"."searches" + 1,
-                      "lastSeenAt" = now()
+                MERGE "SearchMiss" WITH (HOLDLOCK) AS target
+                USING (VALUES ({term}, {narrowed})) AS source("term", "narrowed")
+                  ON target."term" = source."term"
+                 AND target."narrowed" = source."narrowed"
+                WHEN MATCHED THEN
+                  UPDATE SET "searches" = target."searches" + 1,
+                             "lastSeenAt" = SYSUTCDATETIME()
+                WHEN NOT MATCHED THEN
+                  INSERT ("id", "term", "narrowed")
+                  VALUES ({Ids.New()}, {term}, {narrowed});
                 """, ct);
         }
         catch

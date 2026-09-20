@@ -3,6 +3,7 @@ using AutoPartsHub.Api.Admin;
 using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
+using AutoPartsHub.Domain.Catalogue;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -49,8 +50,8 @@ public static class AdminCatalogueWriteEndpoints
                        p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                        p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                        p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
-                       (SELECT COUNT(*)::int FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
-                       (SELECT COUNT(*)::int FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
+                       (SELECT COUNT(*) FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
+                       (SELECT COUNT(*) FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
                        img."url" AS "PrimaryImageUrl",
                        st."stockOnHand" AS "StockOnHand", st."stockAvailable" AS "StockAvailable"
                 FROM "Product" p
@@ -58,25 +59,25 @@ public static class AdminCatalogueWriteEndpoints
                 JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
                 LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
                 LEFT JOIN "GoodsCategory" g ON g."id" = p."goodsCategoryId"
-                LEFT JOIN LATERAL (
+                OUTER APPLY (
                   SELECT pi."url" FROM "ProductImage" pi
-                  WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
-                ) img ON true
-                LEFT JOIN LATERAL (
-                  SELECT SUM(sl."quantity")::int AS "stockOnHand",
-                         SUM(sl."quantity" - sl."reserved")::int AS "stockAvailable"
+                  WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+                ) img
+                OUTER APPLY (
+                  SELECT SUM(sl."quantity") AS "stockOnHand",
+                         SUM(sl."quantity" - sl."reserved") AS "stockAvailable"
                   FROM "StockLevel" sl WHERE sl."productId" = p."id"
-                ) st ON true
+                ) st
                 -- Brand and system are searched deliberately: an admin typing
                 -- "brembo" means the brand, and leaving it out made the filter
                 -- answer nothing for it while the storefront found the parts.
-                WHERE ({term}::text IS NULL
-                   OR p."partNumber" ILIKE {term}
-                   OR p."name" ILIKE {term}
-                   OR m."name" ILIKE {term}
-                   OR v."name" ILIKE {term})
+                WHERE ({term} IS NULL
+                   OR p."partNumber" LIKE {term}
+                   OR p."name" LIKE {term}
+                   OR m."name" LIKE {term}
+                   OR v."name" LIKE {term})
                 ORDER BY v."order" ASC, p."partNumber" ASC
-                LIMIT 300
+                OFFSET 0 ROWS FETCH NEXT 300 ROWS ONLY
                 """).ToListAsync(ct);
 
             var manufacturers = await db.Manufacturers.OrderBy(m => m.Name)
@@ -99,7 +100,7 @@ public static class AdminCatalogueWriteEndpoints
             // filing a new part into a category the shop has retired.
             var goodsCategories = await db.Database.SqlQuery<NamedRow>($"""
                 SELECT "id" AS "Id", "name" AS "Name" FROM "GoodsCategory"
-                WHERE "active" ORDER BY "sortOrder" ASC, "name" ASC
+                WHERE "active" = 1 ORDER BY "sortOrder" ASC, "name" ASC
                 """).ToListAsync(ct);
 
             return Results.Ok(new { products, manufacturers, systems, suppliers, warehouses,
@@ -324,21 +325,32 @@ public static class AdminCatalogueWriteEndpoints
 
             await db.Database.ExecuteSqlAsync($"""
                 DELETE FROM "StockLevel"
-                WHERE "productId" = {id} AND NOT ("warehouseId" = ANY({warehouseIds}::text[]))
+                WHERE "productId" = {id} AND NOT EXISTS (SELECT 1 FROM OPENJSON({SqlList.Of(warehouseIds)}) WHERE value COLLATE DATABASE_DEFAULT = "warehouseId")
                 """, ct);
 
             foreach (var row in rows)
             {
+                // MERGE with HOLDLOCK, which is SQL Server's ON CONFLICT — see
+                // the note in SearchMisses for why the lock is not optional.
+                // PostgreSQL's EXCLUDED is `source` here.
                 await db.Database.ExecuteSqlAsync($"""
-                    INSERT INTO "StockLevel" ("id", "productId", "warehouseId", "quantity",
-                                              "reserved", "binLocation", "updatedAt")
-                    VALUES ({Ids.New()}, {id}, {row.WarehouseId}, {row.Quantity},
-                            {row.Reserved}, {row.BinLocation}, CURRENT_TIMESTAMP)
-                    ON CONFLICT ("productId", "warehouseId") DO UPDATE
-                      SET "quantity" = EXCLUDED."quantity",
-                          "reserved" = EXCLUDED."reserved",
-                          "binLocation" = EXCLUDED."binLocation",
-                          "updatedAt" = CURRENT_TIMESTAMP
+                    MERGE "StockLevel" WITH (HOLDLOCK) AS target
+                    USING (VALUES ({id}, {row.WarehouseId}, {row.Quantity},
+                                   {row.Reserved}, {row.BinLocation}))
+                       AS source("productId", "warehouseId", "quantity", "reserved", "binLocation")
+                      ON target."productId" = source."productId"
+                     AND target."warehouseId" = source."warehouseId"
+                    WHEN MATCHED THEN
+                      UPDATE SET "quantity" = source."quantity",
+                                 "reserved" = source."reserved",
+                                 "binLocation" = source."binLocation",
+                                 "updatedAt" = SYSUTCDATETIME()
+                    WHEN NOT MATCHED THEN
+                      INSERT ("id", "productId", "warehouseId", "quantity",
+                              "reserved", "binLocation", "updatedAt")
+                      VALUES ({Ids.New()}, source."productId", source."warehouseId",
+                              source."quantity", source."reserved", source."binLocation",
+                              SYSUTCDATETIME());
                     """, ct);
             }
 
@@ -379,8 +391,8 @@ public static class AdminCatalogueWriteEndpoints
                    p."manufacturerId" AS "ManufacturerId", m."name" AS "ManufacturerName",
                    p."vehicleSystemId" AS "VehicleSystemId", v."name" AS "SystemName",
                    p."supplierId" AS "SupplierId", s."name" AS "SupplierName",
-                   (SELECT COUNT(*)::int FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
-                   (SELECT COUNT(*)::int FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
+                   (SELECT COUNT(*) FROM "Interchange" i WHERE i."sourceId" = p."id") AS "InterchangeCount",
+                   (SELECT COUNT(*) FROM "ProductImage" pi WHERE pi."productId" = p."id") AS "ImageCount",
                    img."url" AS "PrimaryImageUrl",
                    st."stockOnHand" AS "StockOnHand", st."stockAvailable" AS "StockAvailable"
             FROM "Product" p
@@ -388,15 +400,15 @@ public static class AdminCatalogueWriteEndpoints
             JOIN "VehicleSystem" v ON v."id" = p."vehicleSystemId"
             LEFT JOIN "Supplier" s ON s."id" = p."supplierId"
             LEFT JOIN "GoodsCategory" g ON g."id" = p."goodsCategoryId"
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT pi."url" FROM "ProductImage" pi
-              WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC LIMIT 1
-            ) img ON true
-            LEFT JOIN LATERAL (
-              SELECT SUM(sl."quantity")::int AS "stockOnHand",
-                     SUM(sl."quantity" - sl."reserved")::int AS "stockAvailable"
+              WHERE pi."productId" = p."id" ORDER BY pi."sortOrder" ASC OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY
+            ) img
+            OUTER APPLY (
+              SELECT SUM(sl."quantity") AS "stockOnHand",
+                     SUM(sl."quantity" - sl."reserved") AS "stockAvailable"
               FROM "StockLevel" sl WHERE sl."productId" = p."id"
-            ) st ON true
+            ) st
             WHERE p."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 

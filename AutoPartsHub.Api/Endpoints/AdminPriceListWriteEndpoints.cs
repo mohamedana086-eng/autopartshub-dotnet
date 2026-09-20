@@ -4,6 +4,9 @@ using AutoPartsHub.Api.Auth;
 using AutoPartsHub.Api.Catalogue;
 using AutoPartsHub.Api.Data;
 using AutoPartsHub.Api.Pricing;
+using AutoPartsHub.Domain.Catalogue;
+using AutoPartsHub.Domain.Pricing;
+using AutoPartsHub.Domain;
 using Microsoft.EntityFrameworkCore;
 
 namespace AutoPartsHub.Api.Endpoints;
@@ -94,7 +97,7 @@ public static class AdminPriceListWriteEndpoints
                 SELECT p."id" AS "Id", p."partNumber" AS "PartNumber",
                        COALESCE(a."price", p."basePrice") AS "Cost"
                 FROM "Product" p
-                LEFT JOIN "PriceList" l ON l."active" = TRUE
+                LEFT JOIN "PriceList" l ON l."active" = 1
                 LEFT JOIN "PriceListItem" a ON a."priceListId" = l."id" AND a."productId" = p."id"
                 """).ToListAsync(ct);
 
@@ -104,7 +107,7 @@ public static class AdminPriceListWriteEndpoints
             var interchanges = await db.Database.SqlQuery<InterchangeTargetRow>($"""
                 SELECT "sourceId" AS "ProductId", "targetPartNo" AS "TargetPartNumber"
                 FROM "Interchange"
-                WHERE "exactMatch" = TRUE
+                WHERE "exactMatch" = 1
                 """).ToListAsync(ct);
 
             var currencies = await db.Currencies
@@ -308,7 +311,7 @@ public static class AdminPriceListWriteEndpoints
 
             var written = await db.Database.ExecuteSqlAsync($"""
                 UPDATE "PriceListItem"
-                   SET "markupPercent" = {markup.Value}::double precision
+                   SET "markupPercent" = {markup.Value}
                  WHERE "priceListId" = {id} AND "productId" = {productId}
                 """, ct);
 
@@ -399,25 +402,33 @@ public static class AdminPriceListWriteEndpoints
         {
             var chunk = stored.GetRange(at, Math.Min(InsertChunk, stored.Count - at));
 
-            var ids = chunk.Select(_ => Ids.New()).ToArray();
-            var importIds = chunk.Select(_ => id).ToArray();
-            var lines = chunk.Select(r => r.Line).ToArray();
-            var partNumbers = chunk.Select(r => r.PartNumber).ToArray();
-            var prices = chunk.Select(r => r.Price).ToArray();
-            var currencies = chunk.Select(r => r.Currency).ToArray();
-            var reasons = chunk.Select(r => r.Reason).ToArray();
+            var rows = chunk.Select(r => new
+            {
+                id = Ids.New(),
+                importId = id,
+                line = r.Line,
+                partNumber = r.PartNumber,
+                price = r.Price,
+                currency = r.Currency,
+                reason = r.Reason,
+            });
 
+            // Objects rather than the seven parallel arrays PostgreSQL zipped
+            // with unnest — see SqlList.Rows. `price` stays text: these are
+            // the rows a load could not read, and "12,50" is the evidence.
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "PriceListImportRow" ("id", "importId", "line", "partNumber",
                                                   "price", "currency", "reason")
-                SELECT * FROM unnest(
-                  {ids}::text[],
-                  {importIds}::text[],
-                  {lines}::int[],
-                  {partNumbers}::text[],
-                  {prices}::text[],
-                  {currencies}::text[],
-                  {reasons}::text[]
+                SELECT "id", "importId", "line", "partNumber", "price", "currency", "reason"
+                FROM OPENJSON({SqlList.Rows(rows)})
+                WITH (
+                  "id" nvarchar(400) '$.id',
+                  "importId" nvarchar(400) '$.importId',
+                  "line" int '$.line',
+                  "partNumber" nvarchar(400) '$.partNumber',
+                  "price" nvarchar(400) '$.price',
+                  "currency" nvarchar(400) '$.currency',
+                  "reason" nvarchar(400) '$.reason'
                 )
                 """, ct);
         }
@@ -450,32 +461,40 @@ public static class AdminPriceListWriteEndpoints
         await db.Database.ExecuteSqlAsync($"""
             INSERT INTO "PriceList" ("id", "name", "description", "sourceName", "active", "updatedAt")
             VALUES ({id}, {details.Name}, {details.Description}, {details.SourceName},
-                    FALSE, CURRENT_TIMESTAMP)
+                    0, SYSUTCDATETIME())
             """, ct);
 
         for (var at = 0; at < rows.Count; at += InsertChunk)
         {
             var chunk = rows.GetRange(at, Math.Min(InsertChunk, rows.Count - at));
 
-            var ids = chunk.Select(_ => Ids.New()).ToArray();
-            var listIds = chunk.Select(_ => id).ToArray();
-            var productIds = chunk.Select(r => r.ProductId).ToArray();
-            var prices = chunk.Select(r => r.Price).ToArray();
-            var sourcePrices = chunk.Select(r => r.SourcePrice).ToArray();
-            var sourceCurrencies = chunk.Select(r => r.SourceCurrency).ToArray();
-            var sourcePartNumbers = chunk.Select(r => r.SourcePartNumber).ToArray();
+            var items = chunk.Select(r => new
+            {
+                id = Ids.New(),
+                priceListId = id,
+                productId = r.ProductId,
+                price = r.Price,
+                sourcePrice = r.SourcePrice,
+                sourceCurrency = r.SourceCurrency,
+                sourcePartNumber = r.SourcePartNumber,
+            });
 
+            // Objects rather than the seven parallel arrays PostgreSQL zipped
+            // with unnest — see SqlList.Rows.
             await db.Database.ExecuteSqlAsync($"""
                 INSERT INTO "PriceListItem" ("id", "priceListId", "productId", "price",
                                              "sourcePrice", "sourceCurrency", "sourcePartNumber")
-                SELECT * FROM unnest(
-                  {ids}::text[],
-                  {listIds}::text[],
-                  {productIds}::text[],
-                  {prices}::double precision[],
-                  {sourcePrices}::double precision[],
-                  {sourceCurrencies}::text[],
-                  {sourcePartNumbers}::text[]
+                SELECT "id", "priceListId", "productId", "price",
+                       "sourcePrice", "sourceCurrency", "sourcePartNumber"
+                FROM OPENJSON({SqlList.Rows(items)})
+                WITH (
+                  "id" nvarchar(400) '$.id',
+                  "priceListId" nvarchar(400) '$.priceListId',
+                  "productId" nvarchar(400) '$.productId',
+                  "price" float '$.price',
+                  "sourcePrice" float '$.sourcePrice',
+                  "sourceCurrency" nvarchar(400) '$.sourceCurrency',
+                  "sourcePartNumber" nvarchar(400) '$.sourcePartNumber'
                 )
                 """, ct);
         }
@@ -503,24 +522,24 @@ public static class AdminPriceListWriteEndpoints
         if (active == true)
         {
             await db.Database.ExecuteSqlAsync($"""
-                UPDATE "PriceList" SET "active" = FALSE WHERE "active" = TRUE AND "id" <> {id}
+                UPDATE "PriceList" SET "active" = 0 WHERE "active" = 1 AND "id" <> {id}
                 """, ct);
         }
 
         await db.Database.ExecuteSqlAsync($"""
             UPDATE "PriceList"
-               SET "name" = CASE WHEN {nameSent} THEN {name}::text ELSE "name" END,
-                   "description" = CASE WHEN {descriptionSent} THEN {description}::text
+               SET "name" = CASE WHEN {nameSent} = 1 THEN {name} ELSE "name" END,
+                   "description" = CASE WHEN {descriptionSent} = 1 THEN {description}
                                         ELSE "description" END,
-                   "active" = CASE WHEN {active is not null} THEN {active}::boolean
+                   "active" = CASE WHEN {active is not null} = 1 THEN {active}
                                    ELSE "active" END,
                    -- Null is a value here rather than an absence: it is how the
                    -- margin is taken away again, so the CASE asks whether the
                    -- field was sent, not whether it holds anything.
-                   "markupPercent" = CASE WHEN {markupSent}
-                                          THEN {markupPercent}::double precision
+                   "markupPercent" = CASE WHEN {markupSent} = 1
+                                          THEN {markupPercent}
                                           ELSE "markupPercent" END,
-                   "updatedAt" = CURRENT_TIMESTAMP
+                   "updatedAt" = SYSUTCDATETIME()
              WHERE "id" = {id}
             """, ct);
 
@@ -534,12 +553,12 @@ public static class AdminPriceListWriteEndpoints
             SELECT l."id" AS "Id", l."name" AS "Name", l."description" AS "Description",
                    l."active" AS "Active", l."sourceName" AS "SourceName",
                    l."markupPercent" AS "MarkupPercent",
-                   n."count"::int AS "ItemCount",
+                   n."count" AS "ItemCount",
                    l."createdAt" AS "CreatedAt", l."updatedAt" AS "UpdatedAt"
             FROM "PriceList" l
-            LEFT JOIN LATERAL (
+            OUTER APPLY (
               SELECT COUNT(*) AS "count" FROM "PriceListItem" i WHERE i."priceListId" = l."id"
-            ) n ON TRUE
+            ) n
             WHERE l."id" = {id}
             """).ToListAsync(ct)).FirstOrDefault();
 
